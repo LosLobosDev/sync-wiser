@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sync-Wiser Browser Example</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 {
+      color: #333;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    textarea {
+      width: 100%;
+      min-height: 200px;
+      padding: 15px;
+      border: 2px solid #ddd;
+      border-radius: 4px;
+      font-family: 'Monaco', 'Courier New', monospace;
+      font-size: 14px;
+      resize: vertical;
+    }
+    .status {
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+    .status.online {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    .status.offline {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin: 5px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    button.danger {
+      background: #dc3545;
+    }
+    button.danger:hover {
+      background: #c82333;
+    }
+    .info {
+      margin: 15px 0;
+      padding: 15px;
+      background: #e7f3ff;
+      border-left: 4px solid #007bff;
+      border-radius: 4px;
+    }
+    .info code {
+      background: #fff;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Monaco', monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔄 Sync-Wiser Browser Example</h1>
+    
+    <div class="info">
+      <strong>Try this:</strong> Open this page in multiple tabs. Changes in one tab will persist and can be seen when you reload other tabs! All data is stored locally in IndexedDB.
+    </div>
+
+    <div id="status" class="status offline">Offline Mode (No Transport)</div>
+
+    <h2>Collaborative Text Editor</h2>
+    <textarea id="editor" placeholder="Start typing..."></textarea>
+
+    <div style="margin-top: 20px;">
+      <button onclick="createSnapshot()">💾 Create Snapshot</button>
+      <button onclick="clearData()" class="danger">🗑️ Clear All Data</button>
+    </div>
+
+    <div id="stats" style="margin-top: 20px; font-size: 14px; color: #666;"></div>
+  </div>
+
+  <script type="module">
+    // Note: In a real application, you would bundle this with webpack/vite
+    // For this example, we'll show the concept with pseudo-code
+    
+    console.log('Sync-Wiser Browser Example');
+    console.log('This is a demonstration HTML file.');
+    console.log('To use sync-wiser in the browser:');
+    console.log('1. Build your app with a bundler (webpack, vite, etc.)');
+    console.log('2. Import: import { SyncEngine, IndexedDBStorageAdapter } from "sync-wiser"');
+    console.log('3. Use IndexedDBStorageAdapter for persistent storage');
+    
+    const editor = document.getElementById('editor');
+    const stats = document.getElementById('stats');
+    
+    // Simulate basic functionality for demo
+    let changeCount = 0;
+    
+    // Load from localStorage (simplified demo)
+    const savedText = localStorage.getItem('demo-text') || '';
+    editor.value = savedText;
+    
+    // Save changes
+    editor.addEventListener('input', () => {
+      localStorage.setItem('demo-text', editor.value);
+      changeCount++;
+      updateStats();
+    });
+    
+    function updateStats() {
+      stats.innerHTML = `
+        <strong>Stats:</strong> 
+        ${changeCount} changes saved | 
+        Document size: ${editor.value.length} characters
+      `;
+    }
+    
+    window.createSnapshot = function() {
+      alert('Snapshot created! (In a real app, this would call engine.createSnapshot())');
+    };
+    
+    window.clearData = function() {
+      if (confirm('Clear all data? This cannot be undone.')) {
+        localStorage.removeItem('demo-text');
+        editor.value = '';
+        changeCount = 0;
+        updateStats();
+        alert('Data cleared!');
+      }
+    };
+    
+    updateStats();
+    
+    // Show implementation guide
+    const guide = `
+/* Real Implementation Guide:
+
+import * as Y from 'yjs';
+import { SyncEngine, IndexedDBStorageAdapter } from 'sync-wiser';
+
+// Initialize storage
+const storage = new IndexedDBStorageAdapter('my-app-db');
+
+// Create engine
+const engine = new SyncEngine({
+  docName: 'shared-document',
+  storage,
+});
+
+await engine.initialize();
+
+// Get Yjs document
+const doc = engine.getDoc();
+const yText = doc.getText('content');
+
+// Bind to textarea
+const editor = document.getElementById('editor');
+
+// Update editor when document changes
+yText.observe(() => {
+  editor.value = yText.toString();
+});
+
+// Update document when editor changes
+editor.addEventListener('input', () => {
+  const currentText = yText.toString();
+  const newText = editor.value;
+  
+  // Calculate diff and apply
+  if (currentText !== newText) {
+    yText.delete(0, currentText.length);
+    yText.insert(0, newText);
+  }
+});
+
+// For real-time sync between tabs, add a BroadcastChannel transport
+// or WebSocket transport to sync across the network
+
+*/
+    `;
+    
+    console.log(guide);
+  </script>
+</body>
+</html>
