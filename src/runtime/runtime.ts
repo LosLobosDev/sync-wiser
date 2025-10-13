@@ -78,9 +78,27 @@ export class WiserRuntime {
         Y.applyUpdate(doc, decoded, STORAGE_ORIGIN);
       }
     }
-    const { data } = model.instantiate(doc);
+    const entry: ManagedDoc<TShape> = {
+      id,
+      doc,
+      model,
+      data: undefined as unknown as TShape,
+      updatesSinceSnapshot: 0,
+      bytesSinceSnapshot: 0,
+      unsubscribe: () => {
+        /* replaced after handler registration */
+      },
+      syncQueue: null,
+      pendingSyncUpdates:
+        stored?.pendingSync?.map((update) => update.slice()) ?? [],
+    };
 
-    let entry!: ManagedDoc<TShape>;
+    await this.fetchAndApplyFromSync(entry);
+
+    const { data } = model.instantiate(doc);
+    entry.data = data;
+    this.refreshModelData(entry);
+
     const updateHandler = (update: Uint8Array, origin: unknown) => {
       if (origin === STORAGE_ORIGIN) {
         return;
@@ -113,22 +131,9 @@ export class WiserRuntime {
     };
 
     doc.on('update', updateHandler);
-    entry = {
-      id,
-      doc,
-      model,
-      data,
-      updatesSinceSnapshot: 0,
-      bytesSinceSnapshot: 0,
-      unsubscribe: () => {
-        doc.off('update', updateHandler);
-      },
-      syncQueue: null,
-      pendingSyncUpdates:
-        stored?.pendingSync?.map((update) => update.slice()) ?? [],
+    entry.unsubscribe = () => {
+      doc.off('update', updateHandler);
     };
-
-    await this.fetchAndApplyFromSync(entry);
 
     if (entry.pendingSyncUpdates.length > 0 && this.config.sync) {
       const pendingQueue = entry.pendingSyncUpdates.slice();
@@ -185,7 +190,11 @@ export class WiserRuntime {
 
     const decoded = this.decode(result);
     Y.applyUpdate(entry.doc, decoded, SYNC_ORIGIN);
-    this.refreshModelData(entry);
+    if (entry.data) {
+      this.refreshModelData(entry);
+    }
+    const snapshot = this.encode(Y.encodeStateAsUpdate(entry.doc));
+    await this.storage.setSnapshot(entry.id, snapshot);
   }
 
   private async syncOutgoingUpdate(
@@ -203,7 +212,7 @@ export class WiserRuntime {
 
     await sync.push(entry.id, update);
     if (entry.pendingSyncUpdates.length > 0) {
-      const [, ...remaining] = entry.pendingSyncUpdates.slice();
+      const [, ...remaining] = entry.pendingSyncUpdates;
       await this.setPendingSyncState(entry, remaining);
     }
   }
@@ -221,6 +230,10 @@ export class WiserRuntime {
 
   private refreshModelData(entry: ManagedDoc<any>) {
     const latest = entry.model.ensureStructure(entry.doc);
+    if (!entry.data) {
+      entry.data = latest;
+      return;
+    }
     for (const key of Object.keys(latest)) {
       (entry.data as Record<string, unknown>)[key] = (latest as Record<
         string,

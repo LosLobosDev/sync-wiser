@@ -98,7 +98,7 @@ describe('WiserRuntime', () => {
 
     const stored = await storage.get('doc-sync');
     expect(stored).not.toBeNull();
-    expect(stored?.updates.length).toBeGreaterThan(0);
+    expect(stored?.snapshot).not.toBeNull();
     expect(pullMock).toHaveBeenCalledTimes(1);
     expect(syncCalls[0]?.stateVector).toBeInstanceOf(Uint8Array);
   });
