@@ -15,13 +15,13 @@ type Storage = {
 ```
 
 ### Usage guidance
-- **Persistence strategy**: Start with in-memory or file-based storage for prototypes. In production, map `docId` → `Uint8Array` into your SQL, KV, or object store.
+- **Persistence strategy**: Map `docId` → `Uint8Array` into a durable store from day one—SQLite/Postgres, DynamoDB, or any KV/object storage that fits your stack. Reserve in-memory implementations strictly for unit tests.
 - **Snapshots vs updates**: For large docs, store snapshots occasionally and incremental updates in between. Yjs encodes both via `Y.encodeStateAsUpdate`.
 - **Concurrency**: If multiple workers handle the same doc, ensure `set` is idempotent or guarded by version checks.
 
 ## Sync adapter (`Wiser.Sync`)
 
-Handles pull/push reconciliation for clients that need to catch up after being offline.
+Handles pull/push reconciliation for clients that went offline. The server acts as a durable store—it does not need to run Yjs itself.
 
 ```ts
 type Sync = {
@@ -31,8 +31,8 @@ type Sync = {
 ```
 
 ### Usage guidance
-- **Pull**: Use Yjs’ `Y.encodeStateVector` (client) and `Y.encodeStateAsUpdate` (server) to send only missing updates.
-- **Push**: Persist the incoming update, then optionally broadcast through your realtime system.
+- **Pull**: Clients include their Yjs state vector. The server simply returns the freshest snapshot or aggregated update it has stored—no CRDT merge logic required server-side because the client merges the response with its local doc.
+- **Push**: Persist incoming updates as opaque `Uint8Array` blobs. Optionally fan them out via realtime transports, but avoid mutating their contents.
 - **Transport**: REST endpoints, gRPC handlers, or message queues all work—the adapter only defines the signature.
 
 ## Realtime adapter (`Wiser.RealTime`)
@@ -63,7 +63,6 @@ type Codec = {
 ```
 
 ### Usage guidance
-- **Compression**: Apply gzip/brotli if bandwidth is a concern.
 - **Encryption**: Encrypt at rest or over the wire without touching application code.
 - **Versioning**: Migrate between schemas by rewriting updates in `encode`/`decode`.
 
