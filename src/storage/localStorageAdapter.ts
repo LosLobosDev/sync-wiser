@@ -45,6 +45,7 @@ function docKey(namespace: string, docId: string): string {
 type PersistedDoc = {
   snapshot?: string;
   updates?: string[];
+  pendingSync?: string[];
 };
 
 export function createLocalStorageAdapter(
@@ -88,11 +89,21 @@ export function createLocalStorageAdapter(
         fromBase64(encoded)
       );
 
-      if (!snapshot && updates.length === 0) return null;
+      const pendingSync = (persisted.pendingSync ?? []).map((encoded) =>
+        fromBase64(encoded)
+      );
+
+      if (
+        !snapshot &&
+        updates.length === 0 &&
+        pendingSync.length === 0
+      )
+        return null;
 
       return {
         snapshot,
         updates,
+        pendingSync,
       };
     },
 
@@ -112,6 +123,19 @@ export function createLocalStorageAdapter(
       }
 
       persisted.updates = updates;
+      write(docId, persisted);
+    },
+
+    async markPendingSync(docId: string, updatesToMark: Uint8Array[]) {
+      const persisted = read(docId) ?? {};
+      persisted.pendingSync = updatesToMark.map((update) => toBase64(update));
+      write(docId, persisted);
+    },
+
+    async clearPendingSync(docId: string) {
+      const persisted = read(docId);
+      if (!persisted) return;
+      delete persisted.pendingSync;
       write(docId, persisted);
     },
 

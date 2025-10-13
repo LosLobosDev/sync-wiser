@@ -6,6 +6,7 @@ import type {
 } from '../types';
 
 const STORAGE_ORIGIN = Symbol('wiser/storage');
+const SYNC_ORIGIN = Symbol('wiser/sync');
 
 type ManagedDoc<TShape extends Record<string, unknown>> = {
   id: string;
@@ -15,6 +16,8 @@ type ManagedDoc<TShape extends Record<string, unknown>> = {
   updatesSinceSnapshot: number;
   bytesSinceSnapshot: number;
   unsubscribe: () => void;
+  syncQueue: Promise<void> | null;
+  pendingSyncUpdates: Uint8Array[];
 };
 
 export type WiserDocumentHandle<TShape extends Record<string, unknown>> = {
@@ -64,7 +67,17 @@ export class WiserRuntime {
     model: WiserModel<TShape>
   ): Promise<ManagedDoc<TShape>> {
     const doc = new Y.Doc();
-    await this.hydrateFromStorage(id, doc);
+    const stored = await this.storage.get(id);
+    if (stored) {
+      if (stored.snapshot) {
+        const snapshot = this.decode(stored.snapshot);
+        Y.applyUpdate(doc, snapshot, STORAGE_ORIGIN);
+      }
+      for (const update of stored.updates) {
+        const decoded = this.decode(update);
+        Y.applyUpdate(doc, decoded, STORAGE_ORIGIN);
+      }
+    }
     const { data } = model.instantiate(doc);
 
     let entry!: ManagedDoc<TShape>;
@@ -73,15 +86,33 @@ export class WiserRuntime {
         return;
       }
 
-      const encoded = this.encode(update);
+      this.refreshModelData(entry);
 
-      this.persistUpdate(id, encoded, entry).catch((error) =>
-        this.reportError(error)
-      );
+      const encoded = this.encode(update);
+      if (origin === SYNC_ORIGIN) {
+        this.persistUpdate(id, encoded, entry, { markPending: false }).catch(
+          (error) => this.reportError(error)
+        );
+        return;
+      }
+
+      const persistPromise = this.persistUpdate(id, encoded, entry, {
+        markPending: true,
+      });
+
+      persistPromise.catch((error) => this.reportError(error));
+
+      if (!this.config.sync) {
+        return;
+      }
+
+      this.enqueueSync(entry, async () => {
+        await persistPromise;
+        await this.syncOutgoingUpdate(entry, encoded);
+      });
     };
 
     doc.on('update', updateHandler);
-
     entry = {
       id,
       doc,
@@ -92,24 +123,23 @@ export class WiserRuntime {
       unsubscribe: () => {
         doc.off('update', updateHandler);
       },
+      syncQueue: null,
+      pendingSyncUpdates:
+        stored?.pendingSync?.map((update) => update.slice()) ?? [],
     };
 
+    await this.fetchAndApplyFromSync(entry);
+
+    if (entry.pendingSyncUpdates.length > 0 && this.config.sync) {
+      const pendingQueue = entry.pendingSyncUpdates.slice();
+      for (const pendingUpdate of pendingQueue) {
+        this.enqueueSync(entry, () =>
+          this.syncOutgoingUpdate(entry!, pendingUpdate)
+        );
+      }
+    }
+
     return entry;
-  }
-
-  private async hydrateFromStorage(id: string, doc: Y.Doc) {
-    const stored = await this.storage.get(id);
-    if (!stored) return;
-
-    if (stored.snapshot) {
-      const snapshot = this.decode(stored.snapshot);
-      Y.applyUpdate(doc, snapshot, STORAGE_ORIGIN);
-    }
-
-    for (const update of stored.updates) {
-      const decoded = this.decode(update);
-      Y.applyUpdate(doc, decoded, STORAGE_ORIGIN);
-    }
   }
 
   private async mutate<TShape extends Record<string, unknown>>(
@@ -129,13 +159,94 @@ export class WiserRuntime {
   private async persistUpdate(
     id: string,
     update: Uint8Array,
-    entry: ManagedDoc<any>
+    entry: ManagedDoc<any>,
+    options: { markPending: boolean }
   ) {
     await this.storage.appendUpdate(id, update);
+    if (options.markPending) {
+      const pending = [...entry.pendingSyncUpdates, update.slice()];
+      await this.setPendingSyncState(entry, pending);
+    }
     entry.updatesSinceSnapshot += 1;
     entry.bytesSinceSnapshot += update.byteLength;
 
     await this.maybeSnapshot(id, entry);
+  }
+
+  private async fetchAndApplyFromSync(entry: ManagedDoc<any>) {
+    const { sync } = this.config;
+    if (!sync) return;
+
+    const stateVector = Y.encodeStateVector(entry.doc);
+    const result = await sync.pull(entry.id, stateVector);
+    if (!result || result.length === 0) {
+      return;
+    }
+
+    const decoded = this.decode(result);
+    Y.applyUpdate(entry.doc, decoded, SYNC_ORIGIN);
+    this.refreshModelData(entry);
+  }
+
+  private async syncOutgoingUpdate(
+    entry: ManagedDoc<any>,
+    update: Uint8Array
+  ): Promise<void> {
+    const { sync } = this.config;
+    if (!sync) return;
+
+    const shouldPullFirst = this.config.policies?.pullBeforePush !== false;
+
+    if (shouldPullFirst) {
+      await this.fetchAndApplyFromSync(entry);
+    }
+
+    await sync.push(entry.id, update);
+    if (entry.pendingSyncUpdates.length > 0) {
+      const [, ...remaining] = entry.pendingSyncUpdates;
+      await this.setPendingSyncState(entry, remaining);
+    }
+  }
+
+  private enqueueSync(
+    entry: ManagedDoc<any>,
+    task: () => Promise<void>
+  ): void {
+    const chain = entry.syncQueue ?? Promise.resolve();
+    const next = chain.then(task);
+    entry.syncQueue = next.catch((error) => {
+      this.reportError(error);
+    });
+  }
+
+  private refreshModelData(entry: ManagedDoc<any>) {
+    const latest = entry.model.ensureStructure(entry.doc);
+    for (const key of Object.keys(latest)) {
+      (entry.data as Record<string, unknown>)[key] = (latest as Record<
+        string,
+        unknown
+      >)[key];
+    }
+  }
+
+  private async setPendingSyncState(
+    entry: ManagedDoc<any>,
+    updates: Uint8Array[]
+  ): Promise<void> {
+    entry.pendingSyncUpdates = updates.map((update) => update.slice());
+
+    if (updates.length === 0) {
+      if (this.storage.clearPendingSync) {
+        await this.storage.clearPendingSync(entry.id);
+      } else if (this.storage.markPendingSync) {
+        await this.storage.markPendingSync(entry.id, []);
+      }
+      return;
+    }
+
+    if (this.storage.markPendingSync) {
+      await this.storage.markPendingSync(entry.id, entry.pendingSyncUpdates);
+    }
   }
 
   private async maybeSnapshot(

@@ -144,7 +144,7 @@ export function List({ id }: { id: string }) {
 - Policies expose Yjs best practices such as garbage collection and snapshot cadence to keep doc size under control.
 
 ## Configuration cheatsheet
-- **`storage`** *(required)*: implements `{ get, setSnapshot, appendUpdate, remove }`, returning both the latest snapshot (if any) and pending updates.
+- **`storage`** *(required)*: implements `{ get, setSnapshot, appendUpdate, remove }` and can optionally provide `markPendingSync/clearPendingSync` so offline work survives restarts. `get` returns the latest snapshot, queued updates, and any pending sync backlog.
 - **`sync`**: batch reconciliation path for clients that reconnect or request history.
 - **`realtime`**: live pub/sub channel for hot updates.
 - **`codec`**: transform updates (compression, encryption, schema migration).

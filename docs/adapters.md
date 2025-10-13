@@ -11,9 +11,12 @@ type Storage = {
   get(docId: string): Promise<{
     snapshot: Uint8Array | null;
     updates: Uint8Array[];
+    pendingSync?: Uint8Array[];
   } | null>;
   setSnapshot(docId: string, snapshot: Uint8Array): Promise<void>;
   appendUpdate(docId: string, update: Uint8Array): Promise<void>;
+  markPendingSync?(docId: string, updates: Uint8Array[]): Promise<void>;
+  clearPendingSync?(docId: string): Promise<void>;
   remove(docId: string): Promise<void>;
 };
 ```
@@ -21,6 +24,7 @@ type Storage = {
 ### Usage guidance
 - **Persistence strategy**: Map `docId` → { latest snapshot, ordered updates } into a durable store from day one—SQLite/Postgres, DynamoDB, or any KV/object storage that fits your stack. Reserve in-memory implementations strictly for unit tests.
 - **Snapshots are hints**: Clients must upload every incremental update; snapshots simply let cold clients bootstrap faster. Treat snapshots as optional blobs you can hand out when a doc is requested with no local state.
+- **Offline pending markers**: Implement `markPendingSync`/`clearPendingSync` so the runtime can persist the backlog of updates that still need to be pushed when connectivity returns. When these hooks are omitted, pending queues fall back to in-memory only.
 - **Freshness metadata**: Track a lightweight version (e.g., monotonic counter or Yjs state vector hash) alongside snapshots so a stale snapshot upload never replaces a fresher one.
 - **Concurrency**: If multiple workers handle the same doc, guard `setSnapshot`/`appendUpdate` with optimistic concurrency or transactional writes to preserve ordering.
 

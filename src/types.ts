@@ -3,6 +3,7 @@ import type * as Y from 'yjs';
 export type StoredDoc = {
   snapshot: Uint8Array | null;
   updates: Uint8Array[];
+  pendingSync?: Uint8Array[];
 };
 
 export type StorageAdapter = {
@@ -10,6 +11,8 @@ export type StorageAdapter = {
   setSnapshot(docId: string, snapshot: Uint8Array): Promise<void>;
   appendUpdate(docId: string, update: Uint8Array): Promise<void>;
   remove(docId: string): Promise<void>;
+  markPendingSync?(docId: string, updates: Uint8Array[]): Promise<void>;
+  clearPendingSync?(docId: string): Promise<void>;
 };
 
 export type SyncAdapter = {
