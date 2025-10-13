@@ -1,0 +1,27 @@
+{
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "name": "sync-wiser",
+  "version": "0.1.0",
+  "description": "Local-first collaboration engine built on Yjs",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shopwiser/sync-wiser.git"
+  },
+  "bugs": {
+    "url": "https://github.com/shopwiser/sync-wiser/issues"
+  },
+  "homepage": "https://github.com/shopwiser/sync-wiser#readme",
+  "keywords": [
+    "crdt",
+    "local-first",
+    "yjs",
+    "collaboration",
+    "realtime"
+  ],
+  "main": "dist/index.cjs",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts"
+}
