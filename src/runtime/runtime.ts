@@ -203,7 +203,7 @@ export class WiserRuntime {
 
     await sync.push(entry.id, update);
     if (entry.pendingSyncUpdates.length > 0) {
-      const [, ...remaining] = entry.pendingSyncUpdates;
+      const remaining = entry.pendingSyncUpdates.slice(1);
       await this.setPendingSyncState(entry, remaining);
     }
   }
