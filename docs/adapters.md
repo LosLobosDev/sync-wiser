@@ -24,6 +24,10 @@ type Storage = {
 - **Freshness metadata**: Track a lightweight version (e.g., monotonic counter or Yjs state vector hash) alongside snapshots so a stale snapshot upload never replaces a fresher one.
 - **Concurrency**: If multiple workers handle the same doc, guard `setSnapshot`/`appendUpdate` with optimistic concurrency or transactional writes to preserve ordering.
 
+### Built-in helpers
+- `createInMemoryStorageAdapter()`: lightweight adapter for unit tests and playgrounds. Data resets when the process restarts.
+- `createLocalStorageAdapter(options?)`: persists snapshots and update logs in `window.localStorage`. Accepts a `namespace`, custom `storage` implementation, and `maxUpdatesPerDoc` limit to trim history.
+
 ## Sync adapter (`Wiser.Sync`)
 
 Handles pull/push reconciliation for clients that went offline. The server acts as a durable store—it does not need to run Yjs itself.

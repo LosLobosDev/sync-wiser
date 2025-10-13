@@ -1,14 +1,4 @@
-export type StoredDoc = {
-  snapshot: Uint8Array | null;
-  updates: Uint8Array[];
-};
-
-export type StorageAdapter = {
-  get(docId: string): Promise<StoredDoc | null>;
-  setSnapshot(docId: string, snapshot: Uint8Array): Promise<void>;
-  appendUpdate(docId: string, update: Uint8Array): Promise<void>;
-  remove(docId: string): Promise<void>;
-};
+import type { StorageAdapter, StoredDoc } from '../types';
 
 export function createInMemoryStorageAdapter(): StorageAdapter {
   const snapshots = new Map<string, Uint8Array>();

@@ -46,10 +46,10 @@ export const ShoppingList = Wiser.define('ShoppingList', (y) => ({
 
 ```tsx
 import { WiserProvider } from '@sync-wiser/react';
-import { StorageAdapter } from './adapters/storage'; // implement Wiser.Storage
+import { createLocalStorageAdapter } from '@sync-wiser';
 
 const wiserConfig: Wiser.Config = {
-  storage: new StorageAdapter(), // required – persists snapshots plus the update log
+  storage: createLocalStorageAdapter(), // required – persists snapshots plus the update log
   // Optional (sync, realtime, codec, policies, cache, logger, onError)
   // start with safe defaults. Override pieces as your deployment matures.
 };
@@ -157,3 +157,6 @@ export function List({ id }: { id: string }) {
 1. Prototype with an in-memory `storage` adapter, then plug in your persistence (SQL/KV/Object storage).
 2. Layer in a `sync` route that mirrors Yjs’ update encoding so cold clients can catch up fast.
 3. Add presence by pairing sync-wiser with Yjs Awareness if you need cursors, selections, or typing indicators.
+
+## Examples
+- `examples/react-counter`: React + Vite demo showing `WiserProvider`, `useWiserDoc`, and the storage adapters powering a shared counter and todo list.
