@@ -137,7 +137,7 @@ export function List({ id }: { id: string }) {
 
 ## How sync-wiser layers on Yjs
 - Each model wraps a `Y.Doc`. Mutations run inside Yjs transactions; when they close, sync-wiser generates updates that merge conflict-free across peers.
-- The `storage` adapter persists snapshots or updates (depending on your strategy). Use the Yjs guide on update encoding for reference: https://docs.yjs.dev/how-to/y-doc-updates.
+- The `storage` adapter persists snapshots or updates (depending on your strategy). Use the Yjs guide on update encoding for reference: https://docs.yjs.dev/api/document-updates.
 - The `sync` adapter handles pull/push reconciliation so reconnecting devices can catch up even without realtime transport.
 - The `realtime` adapter fan-outs updates in real time (WebSocket, SignalR, WebRTC, etc.).
 - Codecs let you transform `Uint8Array` payloads (compression/encryption) before persistence or transport.
