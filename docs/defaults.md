@@ -8,7 +8,7 @@ sync-wiser ships with conservative defaults so you can get a local prototype run
 - **`realtime`**: `undefined`. No live broadcast out of the box. Useful for single-user testing or demos without WebSocket infrastructure.
 - **`codec`**: No-op identity codec (`encode`/`decode` return the original `Uint8Array`). Keeps the pipeline simple until you need compression or encryption.
 - **`policies.gc`**: `false`. Garbage collection is disabled initially to avoid surprising data loss during development. Enable it in production to reclaim detached items.
-- **`policies.snapshotEvery`**: `undefined`. No automatic snapshot cadence. Pair with your storage strategy to control snapshot frequency (e.g. `{ updates: 200 }`).
+- **`policies.snapshotEvery`**: `undefined`. No automatic snapshot cadence. Pair with your storage strategy to control how clients capture local snapshots (updates are still streamed to the server on every mutation).
 - **`policies.pullBeforePush`**: `true`. Ensures clients reconcile state vectors before pushing updates, matching Yjs’ recommended flow.
 - **`cache.maxDocs`**: `20`. An in-memory LRU cache keeps the last N `Y.Doc` instances hydrated for faster access.
 - **`logger`**: `console`. Logs go to the browser/dev console.
@@ -17,7 +17,7 @@ sync-wiser ships with conservative defaults so you can get a local prototype run
 ## When to override
 
 - **Enable GC** when documents grow indefinitely and you’re comfortable pruning deleted content.
-- **Set `snapshotEvery`** if your storage backend prefers full snapshots over incremental updates. For example:
+- **Set `snapshotEvery`** when client devices should periodically upload a fresh snapshot to accelerate cold starts. Snapshots complement, rather than replace, the continuous update stream. For example:
 
   ```ts
   policies: { snapshotEvery: { updates: 200 } }

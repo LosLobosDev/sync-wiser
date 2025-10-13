@@ -46,10 +46,10 @@ export const ShoppingList = Wiser.define('ShoppingList', (y) => ({
 
 ```tsx
 import { WiserProvider } from '@sync-wiser/react';
-import { StorageAdapter } from './adapters/storage'; // implement Wiser.Storage
+import { createLocalStorageAdapter } from '@sync-wiser';
 
 const wiserConfig: Wiser.Config = {
-  storage: new StorageAdapter(), // required – controls how snapshots are persisted
+  storage: createLocalStorageAdapter(), // required – persists snapshots plus the update log
   // Optional (sync, realtime, codec, policies, cache, logger, onError)
   // start with safe defaults. Override pieces as your deployment matures.
 };
@@ -137,14 +137,14 @@ export function List({ id }: { id: string }) {
 
 ## How sync-wiser layers on Yjs
 - Each model wraps a `Y.Doc`. Mutations run inside Yjs transactions; when they close, sync-wiser generates updates that merge conflict-free across peers.
-- The `storage` adapter persists snapshots or updates (depending on your strategy). Use the Yjs guide on update encoding for reference: https://docs.yjs.dev/api/document-updates.
+- The `storage` adapter persists snapshots alongside the append-only update log. Snapshots are optional accelerators for cold starts; clients must still stream every update to the server. See https://docs.yjs.dev/api/document-updates for encoding details.
 - The `sync` adapter handles pull/push reconciliation so reconnecting devices can catch up even without realtime transport.
 - The `realtime` adapter fans out updates in real time (WebSocket, SignalR, WebRTC, etc.).
 - Codecs let you transform `Uint8Array` payloads (compression/encryption) before persistence or transport.
 - Policies expose Yjs best practices such as garbage collection and snapshot cadence to keep doc size under control.
 
 ## Configuration cheatsheet
-- **`storage`** *(required)*: implements `{ get, set, remove }` for document snapshots/updates.
+- **`storage`** *(required)*: implements `{ get, setSnapshot, appendUpdate, remove }`, returning both the latest snapshot (if any) and pending updates.
 - **`sync`**: batch reconciliation path for clients that reconnect or request history.
 - **`realtime`**: live pub/sub channel for hot updates.
 - **`codec`**: transform updates (compression, encryption, schema migration).
@@ -157,3 +157,6 @@ export function List({ id }: { id: string }) {
 1. Prototype with an in-memory `storage` adapter, then plug in your persistence (SQL/KV/Object storage).
 2. Layer in a `sync` route that mirrors Yjs’ update encoding so cold clients can catch up fast.
 3. Add presence by pairing sync-wiser with Yjs Awareness if you need cursors, selections, or typing indicators.
+
+## Examples
+- `examples/react-counter`: React + Vite demo showing `WiserProvider`, `useWiserDoc`, and the storage adapters powering a shared counter and todo list.

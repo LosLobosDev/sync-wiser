@@ -4,20 +4,29 @@ sync-wiser relies on adapters to integrate with your infrastructure. Each adapte
 
 ## Storage adapter (`Wiser.Storage`)
 
-Responsible for persisting document snapshots. Minimum contract:
+Responsible for persisting the latest snapshot **and** the append-only update log for each document. Minimum contract:
 
 ```ts
 type Storage = {
-  get(docId: string): Promise<Uint8Array | null>;
-  set(docId: string, snapshot: Uint8Array): Promise<void>;
+  get(docId: string): Promise<{
+    snapshot: Uint8Array | null;
+    updates: Uint8Array[];
+  } | null>;
+  setSnapshot(docId: string, snapshot: Uint8Array): Promise<void>;
+  appendUpdate(docId: string, update: Uint8Array): Promise<void>;
   remove(docId: string): Promise<void>;
 };
 ```
 
 ### Usage guidance
-- **Persistence strategy**: Map `docId` → `Uint8Array` into a durable store from day one—SQLite/Postgres, DynamoDB, or any KV/object storage that fits your stack. Reserve in-memory implementations strictly for unit tests.
-- **Snapshots vs updates**: For large docs, store snapshots occasionally and incremental updates in between. Yjs encodes both via `Y.encodeStateAsUpdate`.
-- **Concurrency**: If multiple workers handle the same doc, ensure `set` is idempotent or guarded by version checks.
+- **Persistence strategy**: Map `docId` → { latest snapshot, ordered updates } into a durable store from day one—SQLite/Postgres, DynamoDB, or any KV/object storage that fits your stack. Reserve in-memory implementations strictly for unit tests.
+- **Snapshots are hints**: Clients must upload every incremental update; snapshots simply let cold clients bootstrap faster. Treat snapshots as optional blobs you can hand out when a doc is requested with no local state.
+- **Freshness metadata**: Track a lightweight version (e.g., monotonic counter or Yjs state vector hash) alongside snapshots so a stale snapshot upload never replaces a fresher one.
+- **Concurrency**: If multiple workers handle the same doc, guard `setSnapshot`/`appendUpdate` with optimistic concurrency or transactional writes to preserve ordering.
+
+### Built-in helpers
+- `createInMemoryStorageAdapter()`: lightweight adapter for unit tests and playgrounds. Data resets when the process restarts.
+- `createLocalStorageAdapter(options?)`: persists snapshots and update logs in `window.localStorage`. Accepts a `namespace`, custom `storage` implementation, and `maxUpdatesPerDoc` limit to trim history.
 
 ## Sync adapter (`Wiser.Sync`)
 
