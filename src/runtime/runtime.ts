@@ -1,9 +1,6 @@
 import * as Y from 'yjs';
-import type {
-  StorageAdapter,
-  WiserConfig,
-  WiserModel,
-} from '../types';
+import type { StorageAdapter, WiserConfig, WiserModel } from '../types';
+import { assembleStoredDoc } from '../storage/helpers';
 
 const STORAGE_ORIGIN = Symbol('wiser/storage');
 const SYNC_ORIGIN = Symbol('wiser/sync');
@@ -15,6 +12,9 @@ type ManagedDoc<TShape extends Record<string, unknown>> = {
   data: TShape;
   updatesSinceSnapshot: number;
   bytesSinceSnapshot: number;
+  snapshotGeneration: number;
+  syncedSnapshotGeneration: number;
+  isBrandNew: boolean;
   unsubscribe: () => void;
   syncQueue: Promise<void> | null;
   pendingSyncUpdates: Uint8Array[];
@@ -35,6 +35,7 @@ export class WiserRuntime {
   private readonly storage: StorageAdapter;
   private readonly config: WiserConfig;
   private readonly docs = new Map<string, ManagedDoc<any>>();
+  private readonly missingStorageMethods = new Set<string>();
 
   constructor(config: WiserConfig) {
     this.config = config;
@@ -67,7 +68,7 @@ export class WiserRuntime {
     model: WiserModel<TShape>
   ): Promise<ManagedDoc<TShape>> {
     const doc = new Y.Doc();
-    const stored = await this.storage.get(id);
+    const stored = await assembleStoredDoc(this.storage, id);
     if (stored) {
       if (stored.snapshot) {
         const snapshot = this.decode(stored.snapshot);
@@ -78,6 +79,15 @@ export class WiserRuntime {
         Y.applyUpdate(doc, decoded, STORAGE_ORIGIN);
       }
     }
+    const pendingSyncFromStorage = stored?.pendingSync ?? [];
+    const snapshotGeneration =
+      stored?.snapshotGeneration ?? (stored?.snapshot ? 1 : 0);
+    const syncedSnapshotGeneration = stored?.syncedSnapshotGeneration ?? 0;
+    const isBrandNew =
+      !stored ||
+      (!stored.snapshot &&
+        stored.updates.length === 0 &&
+        pendingSyncFromStorage.length === 0);
     const entry: ManagedDoc<TShape> = {
       id,
       doc,
@@ -85,12 +95,14 @@ export class WiserRuntime {
       data: undefined as unknown as TShape,
       updatesSinceSnapshot: 0,
       bytesSinceSnapshot: 0,
+      snapshotGeneration,
+      syncedSnapshotGeneration,
+      isBrandNew,
       unsubscribe: () => {
         /* replaced after handler registration */
       },
       syncQueue: null,
-      pendingSyncUpdates:
-        stored?.pendingSync?.map((update) => update.slice()) ?? [],
+      pendingSyncUpdates: pendingSyncFromStorage.map((update) => update.slice()),
     };
 
     await this.fetchAndApplyFromSync(entry);
@@ -175,15 +187,24 @@ export class WiserRuntime {
     entry.updatesSinceSnapshot += 1;
     entry.bytesSinceSnapshot += update.byteLength;
 
-    await this.maybeSnapshot(id, entry);
+    await this.maybeSnapshot(entry);
   }
 
   private async fetchAndApplyFromSync(entry: ManagedDoc<any>) {
     const { sync } = this.config;
     if (!sync) return;
 
-    const stateVector = Y.encodeStateVector(entry.doc);
-    const result = await sync.pull(entry.id, stateVector);
+    const shouldRequestSnapshot =
+      entry.isBrandNew &&
+      (this.config.policies?.snapshotSync?.requestOnNewDocument ?? true);
+    const stateVector = shouldRequestSnapshot
+      ? undefined
+      : Y.encodeStateVector(entry.doc);
+    const pullOptions = shouldRequestSnapshot
+      ? { requestSnapshot: true }
+      : undefined;
+    const result = await sync.pull(entry.id, stateVector, pullOptions);
+    entry.isBrandNew = false;
     if (!result || result.length === 0) {
       return;
     }
@@ -194,7 +215,10 @@ export class WiserRuntime {
       this.refreshModelData(entry);
     }
     const snapshot = this.encode(Y.encodeStateAsUpdate(entry.doc));
-    await this.storage.setSnapshot(entry.id, snapshot);
+    await this.storeSnapshot(entry, snapshot, {
+      markSynced: true,
+      resetCounters: true,
+    });
   }
 
   private async syncOutgoingUpdate(
@@ -209,6 +233,8 @@ export class WiserRuntime {
     if (shouldPullFirst) {
       await this.fetchAndApplyFromSync(entry);
     }
+
+    await this.syncSnapshotIfNeeded(entry);
 
     await sync.push(entry.id, update);
     if (entry.pendingSyncUpdates.length > 0) {
@@ -253,19 +279,62 @@ export class WiserRuntime {
         await this.storage.clearPendingSync(entry.id);
       } else if (this.storage.markPendingSync) {
         await this.storage.markPendingSync(entry.id, []);
+      } else {
+        this.warnMissingStorageMethod('clearPendingSync');
       }
       return;
     }
 
     if (this.storage.markPendingSync) {
       await this.storage.markPendingSync(entry.id, entry.pendingSyncUpdates);
+    } else {
+      this.warnMissingStorageMethod('markPendingSync');
     }
   }
 
-  private async maybeSnapshot(
-    id: string,
-    entry: ManagedDoc<any>
-  ): Promise<void> {
+  private async syncSnapshotIfNeeded(entry: ManagedDoc<any>): Promise<void> {
+    const { sync } = this.config;
+    if (!sync) return;
+
+    let snapshotPayload: Uint8Array | null = null;
+
+    if (entry.snapshotGeneration === 0) {
+      snapshotPayload = this.encode(Y.encodeStateAsUpdate(entry.doc));
+      await this.storeSnapshot(entry, snapshotPayload, {
+        markSynced: false,
+        resetCounters: true,
+      });
+    }
+
+    const hasUnsyncedSnapshot =
+      entry.snapshotGeneration > entry.syncedSnapshotGeneration;
+
+    if (!hasUnsyncedSnapshot) {
+      return;
+    }
+
+    const sendPolicy = this.config.policies?.snapshotSync?.send;
+    if (sendPolicy === false && entry.syncedSnapshotGeneration > 0) {
+      return;
+    }
+
+    if (!snapshotPayload) {
+      snapshotPayload = this.encode(Y.encodeStateAsUpdate(entry.doc));
+    }
+
+    await sync.push(entry.id, snapshotPayload, { isSnapshot: true });
+    entry.syncedSnapshotGeneration = entry.snapshotGeneration;
+    if (this.storage.markSnapshotSynced) {
+      await this.storage.markSnapshotSynced(
+        entry.id,
+        entry.syncedSnapshotGeneration
+      );
+    } else {
+      this.warnMissingStorageMethod('markSnapshotSynced');
+    }
+  }
+
+  private async maybeSnapshot(entry: ManagedDoc<any>): Promise<void> {
     const { snapshotEvery } = this.config.policies ?? {};
     if (!snapshotEvery) return;
 
@@ -277,12 +346,42 @@ export class WiserRuntime {
 
     if (!shouldSnapshot) return;
 
-    const snapshot = Y.encodeStateAsUpdate(entry.doc);
-    const encoded = this.encode(snapshot);
+    const encoded = this.encode(Y.encodeStateAsUpdate(entry.doc));
+    await this.storeSnapshot(entry, encoded, {
+      markSynced: false,
+      resetCounters: true,
+    });
+  }
 
-    await this.storage.setSnapshot(id, encoded);
-    entry.updatesSinceSnapshot = 0;
-    entry.bytesSinceSnapshot = 0;
+  private async storeSnapshot(
+    entry: ManagedDoc<any>,
+    snapshot: Uint8Array,
+    options: { markSynced: boolean; resetCounters?: boolean }
+  ): Promise<void> {
+    if (this.storage.setSnapshot) {
+      await this.storage.setSnapshot(entry.id, snapshot);
+    } else {
+      this.warnMissingStorageMethod('setSnapshot');
+    }
+
+    entry.snapshotGeneration += 1;
+    if (options.resetCounters) {
+      entry.updatesSinceSnapshot = 0;
+      entry.bytesSinceSnapshot = 0;
+    }
+    if (options.markSynced) {
+      entry.syncedSnapshotGeneration = entry.snapshotGeneration;
+      if (this.storage.markSnapshotSynced) {
+        await this.storage.markSnapshotSynced(
+          entry.id,
+          entry.syncedSnapshotGeneration
+        );
+      } else {
+        this.warnMissingStorageMethod('markSnapshotSynced');
+      }
+    } else if (entry.syncedSnapshotGeneration > entry.snapshotGeneration) {
+      entry.syncedSnapshotGeneration = entry.snapshotGeneration;
+    }
   }
 
   private encode(update: Uint8Array): Uint8Array {
@@ -299,5 +398,18 @@ export class WiserRuntime {
       return;
     }
     this.config.logger?.error?.('[sync-wiser]', error);
+  }
+
+  private warnMissingStorageMethod(method: string) {
+    if (this.missingStorageMethods.has(method)) {
+      return;
+    }
+    this.missingStorageMethods.add(method);
+    const message = `[sync-wiser] StorageAdapter does not implement ${method}(); functionality may be limited.`;
+    if (this.config.logger?.warn) {
+      this.config.logger.warn(message);
+    } else {
+      console.warn(message);
+    }
   }
 }

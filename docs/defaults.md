@@ -10,6 +10,7 @@ sync-wiser ships with conservative defaults so you can get a local prototype run
 - **`policies.gc`**: `false`. Garbage collection is disabled initially to avoid surprising data loss during development. Enable it in production to reclaim detached items.
 - **`policies.snapshotEvery`**: `undefined`. No automatic snapshot cadence. Pair with your storage strategy to control how clients capture local snapshots (updates are still streamed to the server on every mutation).
 - **`policies.pullBeforePush`**: `true`. Ensures clients reconcile state vectors before pushing updates, matching Yjs’ recommended flow.
+- **`policies.snapshotSync`**: `{ send: true, requestOnNewDocument: true }`. Clients upload a snapshot to sync when one hasn’t been sent yet and brand-new docs ask the server for a snapshot on first pull. Disable `send` to avoid resending after the first upload, or turn off `requestOnNewDocument` when your sync endpoint never wants snapshot payloads.
 - **`cache.maxDocs`**: `20`. An in-memory LRU cache keeps the last N `Y.Doc` instances hydrated for faster access.
 - **`logger`**: `console`. Logs go to the browser/dev console.
 - **`onError`**: rethrows errors unless you supply a handler.
@@ -47,6 +48,10 @@ export const config: Wiser.Config = {
     gc: true,
     snapshotEvery: { updates: 250, bytes: 256_000 },
     pullBeforePush: true,
+    snapshotSync: {
+      send: true,
+      requestOnNewDocument: true,
+    },
   },
   cache: { maxDocs: 100 },
   logger,

@@ -4,33 +4,42 @@ sync-wiser relies on adapters to integrate with your infrastructure. Each adapte
 
 ## Storage adapter (`Wiser.Storage`)
 
-Responsible for persisting the latest snapshot **and** the append-only update log for each document. Minimum contract:
+Responsible for persisting the latest snapshot **and** the append-only update log for each document.
 
 ```ts
 type Storage = {
-  get(docId: string): Promise<{
+  getSnapshot?(docId: string): Promise<{
     snapshot: Uint8Array | null;
-    updates: Uint8Array[];
-    pendingSync?: Uint8Array[];
+    snapshotGeneration?: number;
+    syncedSnapshotGeneration?: number;
   } | null>;
-  setSnapshot(docId: string, snapshot: Uint8Array): Promise<void>;
+  getUpdates(docId: string): Promise<Uint8Array[] | null>;
+  getPendingSync?(docId: string): Promise<Uint8Array[] | null>;
+
+  setSnapshot?(docId: string, snapshot: Uint8Array): Promise<void>;
   appendUpdate(docId: string, update: Uint8Array): Promise<void>;
   markPendingSync?(docId: string, updates: Uint8Array[]): Promise<void>;
   clearPendingSync?(docId: string): Promise<void>;
+  markSnapshotSynced?(docId: string, generation: number): Promise<void>;
   remove(docId: string): Promise<void>;
 };
 ```
 
+> Use `assembleStoredDoc(adapter, docId)` from `src/storage/helpers` to materialize a combined `{ snapshot, updates, pendingSync }` structure in tooling or tests without reimplementing the glue logic.
+
 ### Usage guidance
 - **Persistence strategy**: Map `docId` → { latest snapshot, ordered updates } into a durable store from day one—SQLite/Postgres, DynamoDB, or any KV/object storage that fits your stack. Reserve in-memory implementations strictly for unit tests.
-- **Snapshots are hints**: Clients must upload every incremental update; snapshots simply let cold clients bootstrap faster. Treat snapshots as optional blobs you can hand out when a doc is requested with no local state.
+- **Snapshots are hints**: Clients must upload every incremental update; snapshots simply let cold clients bootstrap faster. Cold-start pulls request a snapshot the first time unless you disable `policies.snapshotSync.requestOnNewDocument`.
+- **Skip snapshots if you must**: When `setSnapshot` isn’t implemented, the runtime logs a warning and continues operating without on-disk snapshots.
 - **Offline pending markers**: Implement `markPendingSync`/`clearPendingSync` so the runtime can persist the backlog of updates that still need to be pushed when connectivity returns. When these hooks are omitted, pending queues fall back to in-memory only.
+- **Optional hooks warn once**: If you omit `markPendingSync`, `clearPendingSync`, or `markSnapshotSynced`, the runtime logs a warning the first time it needs them so you can decide whether to implement the persistence.
+- **Snapshot sync metadata**: `snapshotGeneration`/`syncedSnapshotGeneration` let the runtime know whether the current snapshot has been uploaded to sync yet. We store and bump these automatically for you in the built-in adapters; replicate the logic in custom persistence layers so snapshot uploads stay idempotent.
 - **Freshness metadata**: Track a lightweight version (e.g., monotonic counter or Yjs state vector hash) alongside snapshots so a stale snapshot upload never replaces a fresher one.
-- **Concurrency**: If multiple workers handle the same doc, guard `setSnapshot`/`appendUpdate` with optimistic concurrency or transactional writes to preserve ordering.
+- **Concurrency**: If multiple workers handle the same doc, guard `setSnapshot` (when implemented)/`appendUpdate` with optimistic concurrency or transactional writes to preserve ordering.
 
 ### Built-in helpers
 - `createInMemoryStorageAdapter()`: lightweight adapter for unit tests and playgrounds. Data resets when the process restarts.
-- `createLocalStorageAdapter(options?)`: persists snapshots and update logs in `window.localStorage`. Accepts a `namespace`, custom `storage` implementation, and `maxUpdatesPerDoc` limit to trim history.
+- `createLocalStorageAdapter(options?)`: persists snapshots and update logs in `globalThis.localStorage`. Accepts a `namespace`, custom `storage` implementation, and `maxUpdatesPerDoc` limit to trim history. Provide a storage shim plus `globalThis.btoa/atob` (or enable `Buffer`) when running outside the browser, e.g., in React Native.
 
 ## Sync adapter (`Wiser.Sync`)
 
@@ -38,14 +47,22 @@ Handles pull/push reconciliation for clients that went offline. The server acts 
 
 ```ts
 type Sync = {
-  pull(docId: string, stateVector?: Uint8Array): Promise<Uint8Array | null>;
-  push(docId: string, update: Uint8Array): Promise<void>;
+  pull(
+    docId: string,
+    stateVector?: Uint8Array,
+    options?: { requestSnapshot?: boolean }
+  ): Promise<Uint8Array | null>;
+  push(
+    docId: string,
+    update: Uint8Array,
+    options?: { isSnapshot?: boolean }
+  ): Promise<void>;
 };
 ```
 
 ### Usage guidance
-- **Pull**: Clients include their Yjs state vector. The server simply returns the freshest snapshot or aggregated update it has stored—no CRDT merge logic required server-side because the client merges the response with its local doc.
-- **Push**: Persist incoming updates as opaque `Uint8Array` blobs. Optionally fan them out via realtime transports, but avoid mutating their contents.
+- **Pull**: Clients include their Yjs state vector. On brand-new docs the runtime omits the vector and sets `options.requestSnapshot = true` so servers can return a full snapshot cheaply.
+- **Push**: Persist incoming updates as opaque `Uint8Array` blobs. When `options.isSnapshot` is `true`, treat the payload as a complete snapshot for storage instead of an incremental diff.
 - **Transport**: REST endpoints, gRPC handlers, or message queues all work—the adapter only defines the signature.
 
 ## Realtime adapter (`Wiser.RealTime`)

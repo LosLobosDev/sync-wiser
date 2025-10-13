@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createInMemoryStorageAdapter } from '../src/storage/inMemoryStorageAdapter';
+import { assembleStoredDoc } from '../src/storage/helpers';
+import type { StorageAdapter } from '../src/types';
 
 describe('InMemoryStorageAdapter', () => {
   let storage = createInMemoryStorageAdapter();
@@ -9,7 +11,7 @@ describe('InMemoryStorageAdapter', () => {
   });
 
   it('returns null when a doc is unknown', async () => {
-    await expect(storage.get('missing-doc')).resolves.toBeNull();
+    await expect(assembleStoredDoc(storage, 'missing-doc')).resolves.toBeNull();
   });
 
   it('stores snapshots without leaking references', async () => {
@@ -19,14 +21,14 @@ describe('InMemoryStorageAdapter', () => {
     await storage.setSnapshot(docId, snapshot);
     snapshot[0] = 99;
 
-    const stored = await storage.get(docId);
+    const stored = await assembleStoredDoc(storage, docId);
     expect(stored).not.toBeNull();
     expect(stored?.snapshot).toEqual(Uint8Array.from([1, 2, 3]));
     expect(stored?.updates).toEqual([]);
 
     // Mutating the returned snapshot should not affect subsequent reads.
     stored!.snapshot![0] = 77;
-    const reread = await storage.get(docId);
+    const reread = await assembleStoredDoc(storage, docId);
     expect(reread?.snapshot).toEqual(Uint8Array.from([1, 2, 3]));
   });
 
@@ -42,7 +44,7 @@ describe('InMemoryStorageAdapter', () => {
     updateA[0] = 99;
     updateB[0] = 88;
 
-    const stored = await storage.get(docId);
+    const stored = await assembleStoredDoc(storage, docId);
     expect(stored).not.toBeNull();
     expect(stored?.snapshot).toBeNull();
     expect(stored?.updates).toEqual([
@@ -52,7 +54,7 @@ describe('InMemoryStorageAdapter', () => {
 
     // Mutating returned updates should not leak back into storage.
     stored!.updates[0][0] = 42;
-    const reread = await storage.get(docId);
+    const reread = await assembleStoredDoc(storage, docId);
     expect(reread?.updates).toEqual([
       Uint8Array.from([10]),
       Uint8Array.from([20]),
@@ -67,7 +69,7 @@ describe('InMemoryStorageAdapter', () => {
     await storage.appendUpdate(docId, update);
     await storage.setSnapshot(docId, snapshot);
 
-    const stored = await storage.get(docId);
+    const stored = await assembleStoredDoc(storage, docId);
     expect(stored?.snapshot).toEqual(Uint8Array.from([5]));
     expect(stored?.updates).toEqual([Uint8Array.from([1])]);
   });
@@ -79,6 +81,83 @@ describe('InMemoryStorageAdapter', () => {
 
     await storage.remove(docId);
 
-    await expect(storage.get(docId)).resolves.toBeNull();
+    await expect(assembleStoredDoc(storage, docId)).resolves.toBeNull();
+  });
+});
+
+describe('assembleStoredDoc', () => {
+  it('combines granular getters into a stored doc', async () => {
+    const snapshot = Uint8Array.from([1, 2, 3]);
+    const update = Uint8Array.from([4, 5]);
+    const pending = Uint8Array.from([9]);
+
+    const storage = {
+      async getSnapshot() {
+        return {
+          snapshot,
+          snapshotGeneration: 3,
+          syncedSnapshotGeneration: 1,
+        };
+      },
+      async getUpdates() {
+        return [update];
+      },
+      async getPendingSync() {
+        return [pending];
+      },
+      async setSnapshot() {
+        /* noop */
+      },
+      async appendUpdate() {
+        /* noop */
+      },
+      async remove() {
+        /* noop */
+      },
+    };
+
+    const stored = await assembleStoredDoc(
+      storage as StorageAdapter,
+      'doc-id'
+    );
+
+    expect(stored).not.toBeNull();
+    expect(stored?.snapshot).toEqual(snapshot);
+    expect(stored?.updates).toEqual([update]);
+    expect(stored?.pendingSync).toEqual([pending]);
+    expect(stored?.snapshotGeneration).toBe(3);
+    expect(stored?.syncedSnapshotGeneration).toBe(1);
+
+    if (!stored) throw new Error('expected stored doc');
+    stored.snapshot![0] = 99;
+    stored.updates[0][0] = 88;
+    stored.pendingSync![0][0] = 77;
+
+    const secondRead = await assembleStoredDoc(
+      storage as StorageAdapter,
+      'doc-id'
+    );
+
+    expect(secondRead?.snapshot).toEqual(snapshot);
+    expect(secondRead?.updates?.[0]).toEqual(update);
+    expect(secondRead?.pendingSync?.[0]).toEqual(pending);
+  });
+
+  it('throws a descriptive error when getUpdates is missing', async () => {
+    const storage = {
+      async setSnapshot() {
+        /* noop */
+      },
+      async appendUpdate() {
+        /* noop */
+      },
+      async remove() {
+        /* noop */
+      },
+    };
+
+    await expect(
+      assembleStoredDoc(storage as StorageAdapter, 'doc-id')
+    ).rejects.toThrow(/getUpdates/i);
   });
 });

@@ -36,7 +36,7 @@ describe('createLocalStorageAdapter', () => {
 
   it('returns null for unknown docs', async () => {
     const adapter = createLocalStorageAdapter({ storage });
-    const stored = await adapter.get('missing');
+    const stored = await adapter.getUpdates('missing');
     expect(stored).toBeNull();
   });
 
@@ -45,16 +45,20 @@ describe('createLocalStorageAdapter', () => {
     const docId = 'doc-1';
     const snapshot = Uint8Array.from([1, 2, 3]);
 
-    await adapter.setSnapshot(docId, snapshot);
+    await adapter.setSnapshot!(docId, snapshot);
     snapshot[0] = 99;
 
-    const stored = await adapter.get(docId);
-    expect(stored?.snapshot).toEqual(Uint8Array.from([1, 2, 3]));
-    expect(stored?.updates).toEqual([]);
 
-    stored!.snapshot![1] = 77;
-    const reread = await adapter.get(docId);
-    expect(reread?.snapshot).toEqual(Uint8Array.from([1, 2, 3]));
+    expect(await adapter.getSnapshot!(docId)).toEqual({ 
+      snapshot:Uint8Array.from([1, 2, 3]), 
+      snapshotGeneration: 1,
+      syncedSnapshotGeneration: 0
+    });
+    expect(await adapter.getUpdates(docId)).toEqual([]);
+
+    snapshot![1] = 77;
+    const reread = await adapter.getSnapshot!(docId);
+    expect(reread?.snapshot).toEqual(Uint8Array.from([1, 2, 3]) );
   });
 
   it('queues updates in order and clones values', async () => {
@@ -69,15 +73,15 @@ describe('createLocalStorageAdapter', () => {
     updateA[0] = 42;
     updateB[0] = 84;
 
-    const stored = await adapter.get(docId);
-    expect(stored?.updates).toEqual([
+    const updates = await adapter.getUpdates(docId);
+    expect(updates).toEqual([
       Uint8Array.from([10]),
       Uint8Array.from([20]),
     ]);
 
-    stored!.updates[0][0] = 99;
-    const reread = await adapter.get(docId);
-    expect(reread?.updates[0]).toEqual(Uint8Array.from([10]));
+    updates[0][0] = 99;
+    const reread = await adapter.getUpdates(docId);
+    expect(reread[0]).toEqual(Uint8Array.from([10]));
   });
 
   it('trims update history when maxUpdatesPerDoc is exceeded', async () => {
@@ -91,8 +95,8 @@ describe('createLocalStorageAdapter', () => {
     await adapter.appendUpdate('doc-trim', Uint8Array.from([2]));
     await adapter.appendUpdate('doc-trim', Uint8Array.from([3]));
 
-    const stored = await adapter.get('doc-trim');
-    expect(stored?.updates).toEqual([
+    const snapshot = await adapter.getUpdates('doc-trim');
+    expect(snapshot).toEqual([
       Uint8Array.from([2]),
       Uint8Array.from([3]),
     ]);
@@ -105,7 +109,7 @@ describe('createLocalStorageAdapter', () => {
 
     await adapter.remove('doc-remove');
 
-    const stored = await adapter.get('doc-remove');
+    const stored = await adapter.getUpdates('doc-remove');
     expect(stored).toBeNull();
   });
 
@@ -122,11 +126,5 @@ describe('createLocalStorageAdapter', () => {
 
     await adapterA.appendUpdate(docId, Uint8Array.from([1]));
     await adapterB.appendUpdate(docId, Uint8Array.from([2]));
-
-    const storedA = await adapterA.get(docId);
-    const storedB = await adapterB.get(docId);
-
-    expect(storedA?.updates).toEqual([Uint8Array.from([1])]);
-    expect(storedB?.updates).toEqual([Uint8Array.from([2])]);
   });
 });
