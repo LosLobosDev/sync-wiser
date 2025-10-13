@@ -1,14 +1,5 @@
 {
-  "devDependencies": {
-    "@testing-library/react": "^16.0.1",
-    "@types/react": "^18.2.46",
-    "@types/react-dom": "^18.2.18",
-    "jsdom": "^27.0.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
-  },
+  "type": "module",
   "name": "sync-wiser",
   "version": "0.1.0",
   "description": "Local-first collaboration engine built on Yjs",
@@ -37,5 +28,15 @@
   "scripts": {
     "test": "vitest",
     "test:run": "vitest run"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.0.1",
+    "@types/react": "^18.2.46",
+    "@types/react-dom": "^18.2.18",
+    "jsdom": "^27.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   }
 }
