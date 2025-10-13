@@ -134,7 +134,7 @@ export class WiserRuntime {
       const pendingQueue = entry.pendingSyncUpdates.slice();
       for (const pendingUpdate of pendingQueue) {
         this.enqueueSync(entry, () =>
-          this.syncOutgoingUpdate(entry!, pendingUpdate)
+          this.syncOutgoingUpdate(entry, pendingUpdate)
         );
       }
     }
@@ -203,7 +203,7 @@ export class WiserRuntime {
 
     await sync.push(entry.id, update);
     if (entry.pendingSyncUpdates.length > 0) {
-      const remaining = entry.pendingSyncUpdates.slice(1);
+      const [, ...remaining] = entry.pendingSyncUpdates.slice();
       await this.setPendingSyncState(entry, remaining);
     }
   }
