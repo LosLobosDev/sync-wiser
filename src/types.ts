@@ -3,18 +3,48 @@ import type * as Y from 'yjs';
 export type StoredDoc = {
   snapshot: Uint8Array | null;
   updates: Uint8Array[];
+  pendingSync?: Uint8Array[];
+  snapshotGeneration?: number;
+  syncedSnapshotGeneration?: number;
+};
+
+export type StoredSnapshot = {
+  snapshot: Uint8Array | null;
+  snapshotGeneration?: number;
+  syncedSnapshotGeneration?: number;
 };
 
 export type StorageAdapter = {
-  get(docId: string): Promise<StoredDoc | null>;
-  setSnapshot(docId: string, snapshot: Uint8Array): Promise<void>;
+  getSnapshot?(docId: string): Promise<StoredSnapshot | null>;
+  getUpdates(docId: string): Promise<Uint8Array[] | null>;
+  getPendingSync?(docId: string): Promise<Uint8Array[] | null>;
+  setSnapshot?(docId: string, snapshot: Uint8Array): Promise<void>;
   appendUpdate(docId: string, update: Uint8Array): Promise<void>;
   remove(docId: string): Promise<void>;
+  markPendingSync?(docId: string, updates: Uint8Array[]): Promise<void>;
+  clearPendingSync?(docId: string): Promise<void>;
+  markSnapshotSynced?(docId: string, generation: number): Promise<void>;
+};
+
+export type SyncPullOptions = {
+  requestSnapshot?: boolean;
+};
+
+export type SyncPushOptions = {
+  isSnapshot?: boolean;
 };
 
 export type SyncAdapter = {
-  pull(docId: string, stateVector?: Uint8Array): Promise<Uint8Array | null>;
-  push(docId: string, update: Uint8Array): Promise<void>;
+  pull(
+    docId: string,
+    stateVector?: Uint8Array,
+    options?: SyncPullOptions
+  ): Promise<Uint8Array | null>;
+  push(
+    docId: string,
+    update: Uint8Array,
+    options?: SyncPushOptions
+  ): Promise<void>;
 };
 
 export type RealtimeAdapter = {
@@ -34,6 +64,10 @@ export type Policies = {
     bytes?: number;
   };
   pullBeforePush?: boolean;
+  snapshotSync?: {
+    send?: boolean;
+    requestOnNewDocument?: boolean;
+  };
 };
 
 export type CacheOptions = {

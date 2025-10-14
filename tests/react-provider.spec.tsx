@@ -51,8 +51,8 @@ describe('WiserProvider', () => {
 
     expect(await screen.findByText('Count: 1')).not.toBeNull();
 
-    const stored = await storage.get('counter-1');
-    expect(stored).not.toBeNull();
-    expect(stored?.updates.length).toBeGreaterThanOrEqual(1);
+    const storedUpdates = await storage.getUpdates('counter-1');
+    expect(storedUpdates).not.toBeNull();
+    expect(storedUpdates?.length ?? 0).toBeGreaterThanOrEqual(1);
   });
 });

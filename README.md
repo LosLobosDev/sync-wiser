@@ -54,6 +54,10 @@ const wiserConfig: Wiser.Config = {
   // start with safe defaults. Override pieces as your deployment matures.
 };
 
+// On React Native or any non-browser runtime, supply a storage shim implementing
+// { getItem, setItem, removeItem, key, length } and ensure `globalThis.btoa/atob`
+// or `Buffer` are available for base64 encoding.
+
 export function AppRoot() {
   return (
     <WiserProvider config={wiserConfig}>
@@ -144,11 +148,11 @@ export function List({ id }: { id: string }) {
 - Policies expose Yjs best practices such as garbage collection and snapshot cadence to keep doc size under control.
 
 ## Configuration cheatsheet
-- **`storage`** *(required)*: implements `{ get, setSnapshot, appendUpdate, remove }`, returning both the latest snapshot (if any) and pending updates.
+- **`storage`** *(required)*: implements update persistence through `getUpdates` and `appendUpdate`. Add `setSnapshot` to persist snapshots (the runtime simply warns and skips when it’s absent), plus `getSnapshot`/`getPendingSync` for faster hydration. Offline resilience still improves when you add `markPendingSync`/`clearPendingSync`.
 - **`sync`**: batch reconciliation path for clients that reconnect or request history.
 - **`realtime`**: live pub/sub channel for hot updates.
 - **`codec`**: transform updates (compression, encryption, schema migration).
-- **`policies`**: tune GC, snapshot intervals (`updates`/`bytes` thresholds), and `pullBeforePush`.
+- **`policies`**: tune GC, snapshot cadence (`snapshotEvery`), reconciliation behaviour (`pullBeforePush`), and snapshot sync controls (`snapshotSync.send`/`requestOnNewDocument`).
 - **`cache`**, **`logger`**, **`onError`**: operational controls for memory, observability, and resilience.
 
 > Need exact type signatures? Inspect the generated `.d.ts` files in `node_modules/@sync-wiser` or use your editor’s “Go to Definition”.
