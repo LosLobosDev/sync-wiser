@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { WiserModel } from '../types';
-import type { WiserDocumentHandle } from '../runtime/runtime';
+import type {
+  WiserDocumentHandle,
+  WiserManualSyncOptions,
+} from '../runtime/runtime';
 import { useWiserRuntime } from './context';
 
-type UseWiserDocResult<TShape extends Record<string, unknown>> = {
+export type UseWiserDocResult<TShape extends Record<string, unknown>> = {
   data: TShape | null;
   doc: WiserDocumentHandle<TShape>['doc'] | null;
   mutate: (
@@ -11,6 +14,7 @@ type UseWiserDocResult<TShape extends Record<string, unknown>> = {
     options?: { origin?: unknown }
   ) => Promise<void>;
   remove: () => Promise<void>;
+  sync: (options?: WiserManualSyncOptions) => Promise<void>;
   loading: boolean;
   error: unknown | null;
 };
@@ -79,11 +83,20 @@ export function useWiserDoc<TShape extends Record<string, unknown>>(
     setHandle(null);
   }, [handle]);
 
+  const sync = useCallback(
+    async (options?: WiserManualSyncOptions) => {
+      if (!handle) return;
+      await handle.sync(options);
+    },
+    [handle]
+  );
+
   return {
     data: handle?.data ?? null,
     doc: handle?.doc ?? null,
     mutate,
     remove,
+    sync,
     loading,
     error,
   };

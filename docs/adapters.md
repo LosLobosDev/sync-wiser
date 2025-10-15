@@ -64,6 +64,17 @@ type Sync = {
 - **Pull**: Clients include their Yjs state vector. On brand-new docs the runtime omits the vector and sets `options.requestSnapshot = true` so servers can return a full snapshot cheaply.
 - **Push**: Persist incoming updates as opaque `Uint8Array` blobs. When `options.isSnapshot` is `true`, treat the payload as a complete snapshot for storage instead of an incremental diff.
 - **Transport**: REST endpoints, gRPC handlers, or message queues all work—the adapter only defines the signature.
+- **Lifecycle**: As soon as a `sync` adapter is passed to `new WiserRuntime({ sync, storage, ... })`, the runtime issues the initial pull inside `getDocument(...)`, then automatically pushes on every mutation or pending-sync replay—no extra plumbing required.
+
+### Built-in REST adapter
+
+`createRestSyncAdapter(options)` wires the sync contract over REST, keeping the payload format flexible.
+
+- **Server contract**: By default the adapter POSTs to `${baseUrl}/pull` and `${baseUrl}/push` with a bulk `documents` array (one entry per call). Responses must echo `dateLastSynced` so the client can checkpoint future pulls. Override `buildPullRequest`, `parsePullResponse`, `buildPushRequest`, or `parsePushResponse` when your API shape differs.
+- **Snapshots vs updates**: On first sync (`lastSynced === null`) the adapter expects the server to return a snapshot. Subsequent pulls should omit snapshots and respond with updates issued since the supplied `dateLastSynced`.
+- **Encoding**: Base64 is the default wire format. Provide `encodeUpdate`/`decodeUpdate` to swap in compressed binaries, hex strings, or anything else your backend prefers.
+- **Checkpoint persistence**: Supply `getLastSynced`/`setLastSynced` to route timestamps into your own storage (KV, IndexedDB, AsyncStorage). When unspecified, the adapter keeps an in-memory map for the lifetime of the runtime.
+- **Status UI**: Pair `createRestSyncAdapter` with `useSyncWiser()` to surface pull/push activity—and trigger manual reconciliations—directly from your React components.
 
 ## Realtime adapter (`Wiser.RealTime`)
 
@@ -99,16 +110,17 @@ type Codec = {
 ## Putting it together
 
 ```ts
-import { DrizzleAdapter } from '@sync-wiser/drizzle';
-import { SignalRAdapter } from '@sync-wiser/signalr';
-import { RESTAdapter } from '@sync-wiser/rest';
-import { CompressionCodec } from '@sync-wiser/codecs';
+import {
+  createInMemoryStorageAdapter,
+  createRestSyncAdapter,
+  createSignalRRealtimeAdapter,
+  WiserRuntime,
+} from '@sync-wiser';
 
 const config: Wiser.Config = {
-  storage: new DrizzleAdapter(),
-  sync: new RESTAdapter(),
-  realtime: new SignalRAdapter(),
-  codec: new CompressionCodec(),
+  storage: createInMemoryStorageAdapter(),
+  sync: createRestSyncAdapter({ baseUrl: 'https://api.example.com/sync' }),
+  realtime: createSignalRRealtimeAdapter({ url: 'https://api.example.com/hub' }),
 };
 ```
 
