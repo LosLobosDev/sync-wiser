@@ -29,6 +29,27 @@ export type WiserDocumentHandle<TShape extends Record<string, unknown>> = {
     options?: { origin?: unknown }
   ): Promise<void>;
   remove(): Promise<void>;
+  sync(options?: WiserManualSyncOptions): Promise<void>;
+};
+
+export type WiserSyncEvent = {
+  docId: string;
+  direction: 'pull' | 'push';
+  phase: 'start' | 'success' | 'error';
+  isSnapshot?: boolean;
+  requestSnapshot?: boolean;
+  updatesApplied?: number;
+  bytes?: number;
+  error?: unknown;
+  timestamp: number;
+};
+
+type SyncEventPayload = Omit<WiserSyncEvent, 'timestamp'>;
+
+export type WiserManualSyncOptions = {
+  pull?: boolean;
+  push?: boolean;
+  forceSnapshot?: boolean;
 };
 
 export class WiserRuntime {
@@ -36,6 +57,7 @@ export class WiserRuntime {
   private readonly config: WiserConfig;
   private readonly docs = new Map<string, ManagedDoc<any>>();
   private readonly missingStorageMethods = new Set<string>();
+  private readonly syncListeners = new Set<(event: WiserSyncEvent) => void>();
 
   constructor(config: WiserConfig) {
     this.config = config;
@@ -60,6 +82,7 @@ export class WiserRuntime {
       mutate: (updater, options) =>
         this.mutate(entry!, updater, options?.origin),
       remove: () => this.remove(entry!),
+      sync: (options) => this.syncDocument(entry!, options),
     };
   }
 
@@ -203,9 +226,35 @@ export class WiserRuntime {
     const pullOptions = shouldRequestSnapshot
       ? { requestSnapshot: true }
       : undefined;
-    const result = await sync.pull(entry.id, stateVector, pullOptions);
+    this.emitSyncEvent({
+      docId: entry.id,
+      direction: 'pull',
+      phase: 'start',
+      requestSnapshot: shouldRequestSnapshot,
+    });
+    let result: Uint8Array | null = null;
+    try {
+      result = await sync.pull(entry.id, stateVector, pullOptions);
+    } catch (error) {
+      this.emitSyncEvent({
+        docId: entry.id,
+        direction: 'pull',
+        phase: 'error',
+        requestSnapshot: shouldRequestSnapshot,
+        error,
+      });
+      throw error;
+    }
     entry.isBrandNew = false;
     if (!result || result.length === 0) {
+      this.emitSyncEvent({
+        docId: entry.id,
+        direction: 'pull',
+        phase: 'success',
+        requestSnapshot: shouldRequestSnapshot,
+        updatesApplied: 0,
+        bytes: 0,
+      });
       return;
     }
 
@@ -218,6 +267,14 @@ export class WiserRuntime {
     await this.storeSnapshot(entry, snapshot, {
       markSynced: true,
       resetCounters: true,
+    });
+    this.emitSyncEvent({
+      docId: entry.id,
+      direction: 'pull',
+      phase: 'success',
+      requestSnapshot: shouldRequestSnapshot,
+      updatesApplied: 1,
+      bytes: result.byteLength,
     });
   }
 
@@ -236,7 +293,7 @@ export class WiserRuntime {
 
     await this.syncSnapshotIfNeeded(entry);
 
-    await sync.push(entry.id, update);
+    await this.pushWithEvents(entry, update, { isSnapshot: false });
     if (entry.pendingSyncUpdates.length > 0) {
       const [, ...remaining] = entry.pendingSyncUpdates;
       await this.setPendingSyncState(entry, remaining);
@@ -246,12 +303,13 @@ export class WiserRuntime {
   private enqueueSync(
     entry: ManagedDoc<any>,
     task: () => Promise<void>
-  ): void {
+  ): Promise<void> {
     const chain = entry.syncQueue ?? Promise.resolve();
     const next = chain.then(task);
     entry.syncQueue = next.catch((error) => {
       this.reportError(error);
     });
+    return next;
   }
 
   private refreshModelData(entry: ManagedDoc<any>) {
@@ -322,7 +380,7 @@ export class WiserRuntime {
       snapshotPayload = this.encode(Y.encodeStateAsUpdate(entry.doc));
     }
 
-    await sync.push(entry.id, snapshotPayload, { isSnapshot: true });
+    await this.pushWithEvents(entry, snapshotPayload, { isSnapshot: true });
     entry.syncedSnapshotGeneration = entry.snapshotGeneration;
     if (this.storage.markSnapshotSynced) {
       await this.storage.markSnapshotSynced(
@@ -411,5 +469,112 @@ export class WiserRuntime {
     } else {
       console.warn(message);
     }
+  }
+
+  private async pushWithEvents(
+    entry: ManagedDoc<any>,
+    update: Uint8Array,
+    options: { isSnapshot: boolean }
+  ): Promise<void> {
+    const { sync } = this.config;
+    if (!sync) return;
+
+    this.emitSyncEvent({
+      docId: entry.id,
+      direction: 'push',
+      phase: 'start',
+      isSnapshot: options.isSnapshot,
+      bytes: update.byteLength,
+    });
+    try {
+      await sync.push(entry.id, update, { isSnapshot: options.isSnapshot });
+      this.emitSyncEvent({
+        docId: entry.id,
+        direction: 'push',
+        phase: 'success',
+        isSnapshot: options.isSnapshot,
+        bytes: update.byteLength,
+      });
+    } catch (error) {
+      this.emitSyncEvent({
+        docId: entry.id,
+        direction: 'push',
+        phase: 'error',
+        isSnapshot: options.isSnapshot,
+        bytes: update.byteLength,
+        error,
+      });
+      throw error;
+    }
+  }
+
+  private async syncDocument(
+    entry: ManagedDoc<any>,
+    options?: WiserManualSyncOptions
+  ): Promise<void> {
+    const { pull = true, push = true, forceSnapshot = false } = options ?? {};
+
+    if (!this.config.sync) {
+      return;
+    }
+
+    await this.enqueueSync(entry, async () => {
+      if (pull) {
+        await this.fetchAndApplyFromSync(entry);
+      }
+
+      if (push) {
+        if (forceSnapshot) {
+          const encoded = this.encode(Y.encodeStateAsUpdate(entry.doc));
+          await this.storeSnapshot(entry, encoded, {
+            markSynced: false,
+          });
+        }
+
+        await this.syncSnapshotIfNeeded(entry);
+
+        const pendingQueue = entry.pendingSyncUpdates.slice();
+        for (const pending of pendingQueue) {
+          await this.syncOutgoingUpdate(entry, pending);
+        }
+      }
+    });
+  }
+
+  onSyncEvent(listener: (event: WiserSyncEvent) => void): () => void {
+    this.syncListeners.add(listener);
+    return () => {
+      this.syncListeners.delete(listener);
+    };
+  }
+
+  private emitSyncEvent(event: SyncEventPayload) {
+    if (this.syncListeners.size === 0) {
+      return;
+    }
+    const enriched: WiserSyncEvent = {
+      ...event,
+      timestamp: Date.now(),
+    };
+    for (const listener of this.syncListeners) {
+      try {
+        listener(enriched);
+      } catch (error) {
+        this.reportError(error);
+      }
+    }
+  }
+
+  async syncNow(
+    id: string,
+    options?: WiserManualSyncOptions
+  ): Promise<void> {
+    const entry = this.docs.get(id);
+    if (!entry) {
+      throw new Error(
+        `[sync-wiser] Document "${id}" is not loaded; call getDocument() before syncing manually.`
+      );
+    }
+    await this.syncDocument(entry, options);
   }
 }

@@ -3,6 +3,7 @@ import * as Y from 'yjs';
 import { Wiser } from '../src/wiser';
 import { createInMemoryStorageAdapter } from '../src/storage/inMemoryStorageAdapter';
 import { WiserRuntime } from '../src/runtime/runtime';
+import type { WiserSyncEvent } from '../src/runtime/runtime';
 import type {
   StorageAdapter,
   SyncAdapter,
@@ -301,8 +302,8 @@ describe('WiserRuntime', () => {
 
     expect(pushMock).toHaveBeenCalledTimes(3);
     expect(pushCalls[0]?.isSnapshot).toBe(true);
-    expect(pushCalls[1]?.isSnapshot).toBeUndefined();
-    expect(pushCalls[2]?.isSnapshot).toBeUndefined();
+    expect(pushCalls[1]?.isSnapshot).toBe(false);
+    expect(pushCalls[2]?.isSnapshot).toBe(false);
   });
 
   it('requests incremental sync when snapshot requests are disabled for new docs', async () => {
@@ -405,5 +406,83 @@ describe('WiserRuntime', () => {
 
     expect(calls.appendUpdate).toBe(1);
     expect(updatesPushed[0]).toBeInstanceOf(Uint8Array);
+  });
+
+  it('emits sync events for pull and push operations', async () => {
+    const storage = createInMemoryStorageAdapter();
+    const pullMock = vi.fn(async () => null);
+    const pushMock = vi.fn(async () => undefined);
+    const sync: SyncAdapter = {
+      pull: pullMock,
+      push: pushMock,
+    };
+    const runtime = new WiserRuntime({ storage, sync });
+    const events: WiserSyncEvent[] = [];
+    runtime.onSyncEvent((event) => {
+      events.push(event);
+    });
+
+    const handle = await runtime.getDocument('doc-sync-events', Counter);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(pullMock).toHaveBeenCalledTimes(1);
+    expect(
+      events.some(
+        (event) =>
+          event.direction === 'pull' && event.phase === 'start' && event.requestSnapshot === true
+      )
+    ).toBe(true);
+    expect(
+      events.some(
+        (event) =>
+          event.direction === 'pull' && event.phase === 'success' && event.requestSnapshot === true
+      )
+    ).toBe(true);
+
+    const initialEventCount = events.length;
+
+    await handle.mutate((draft) => {
+      draft.stats.set('count', 1);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(pushMock).toHaveBeenCalled();
+    const newEvents = events.slice(initialEventCount);
+    expect(
+      newEvents.some(
+        (event) => event.direction === 'push' && event.phase === 'start'
+      )
+    ).toBe(true);
+    expect(
+      newEvents.some(
+        (event) => event.direction === 'push' && event.phase === 'success'
+      )
+    ).toBe(true);
+    expect(
+      newEvents.some(
+        (event) => event.direction === 'push' && event.isSnapshot === true
+      )
+    ).toBe(true);
+  });
+
+  it('supports manual syncNow calls with configurable options', async () => {
+    const storage = createInMemoryStorageAdapter();
+    const pullMock = vi.fn(async () => null);
+    const pushMock = vi.fn(async () => undefined);
+    const runtime = new WiserRuntime({ storage, sync: { pull: pullMock, push: pushMock } });
+
+    await runtime.getDocument('doc-manual-sync', Counter);
+
+    const initialPulls = pullMock.mock.calls.length;
+    await runtime.syncNow('doc-manual-sync', { pull: true, push: false });
+    expect(pullMock.mock.calls.length).toBe(initialPulls + 1);
+
+    const initialPushes = pushMock.mock.calls.length;
+    await runtime.syncNow('doc-manual-sync', {
+      pull: false,
+      push: true,
+      forceSnapshot: true,
+    });
+    expect(pushMock.mock.calls.length).toBeGreaterThan(initialPushes);
   });
 });
