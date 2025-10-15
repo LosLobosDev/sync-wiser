@@ -199,7 +199,7 @@ export function createSignalRRealtimeAdapter(
           state.joined = false;
           state.joinPromise = ensureConnection()
             .then((activeConnection) =>
-              activeConnection.invoke(joinDocumentMethod, state.key)
+              activeConnection.invoke(joinDocumentMethod, state.key).then(() => activeConnection)
             )
             .then((activeConnection) => {
               state.joined = true;
