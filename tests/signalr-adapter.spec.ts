@@ -1,6 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { createSignalRRealtimeAdapter } from '../src/realtime/signalrAdapter';
 
+type InvocationRecord = {
+  method: string;
+  args: unknown[];
+};
+
 vi.mock('@microsoft/signalr', async () => {
   class MockHubConnection {
     public state = 'Disconnected';
@@ -166,13 +171,17 @@ describe('createSignalRRealtimeAdapter', () => {
     expect(Array.from(handler.mock.calls[0]![0])).toEqual(Array.from(update));
 
     await adapter.publish('doc-1', update);
-    expect(connection.invocations.some((call) => call.method === 'SendDocumentUpdate')).toBe(true);
+    expect(
+      connection.invocations.some(
+        (call: InvocationRecord) => call.method === 'SendDocumentUpdate'
+      )
+    ).toBe(true);
 
     unsubscribe();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const leaveCall = connection.invocations.find(
-      (call) => call.method === 'LeaveDocument'
+      (call: InvocationRecord) => call.method === 'LeaveDocument'
     );
     expect(leaveCall?.args).toEqual(['doc-1']);
   });
@@ -206,7 +215,9 @@ describe('createSignalRRealtimeAdapter', () => {
 
     const connection = builder.connection!;
     expect(
-      connection.invocations.some((call) => call.method === 'JoinDoc')
+      connection.invocations.some(
+        (call: InvocationRecord) => call.method === 'JoinDoc'
+      )
     ).toBe(true);
   });
 
@@ -223,9 +234,11 @@ describe('createSignalRRealtimeAdapter', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const joinCalls = connection.invocations.filter(
-      (call) => call.method === 'JoinDocument'
+      (call: InvocationRecord) => call.method === 'JoinDocument'
     );
-    const joinedDocs = joinCalls.map((call) => call.args[0]);
+    const joinedDocs = joinCalls.map(
+      (call: InvocationRecord) => call.args[0] as string
+    );
 
     expect(joinedDocs).toContain('doc-1');
     expect(joinedDocs).toContain('doc-2');

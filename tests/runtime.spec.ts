@@ -449,11 +449,14 @@ describe('WiserRuntime', () => {
   it('publishes local updates over realtime transport', async () => {
     const storage = createInMemoryStorageAdapter();
     const unsubscribe = vi.fn();
-    const publishMock = vi.fn(async () => {
-      /* noop */
-    });
+    const publishMock = vi.fn<RealtimeAdapter['publish']>(
+      async (_docId, _update) => undefined
+    );
+    const subscribeMock = vi.fn<RealtimeAdapter['subscribe']>(
+      (_docId, _onUpdate) => unsubscribe
+    );
     const realtime: RealtimeAdapter = {
-      subscribe: vi.fn((_docId: string) => unsubscribe),
+      subscribe: subscribeMock,
       publish: publishMock,
     };
 
@@ -466,7 +469,12 @@ describe('WiserRuntime', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(publishMock).toHaveBeenCalledTimes(1);
-    const [, payload] = publishMock.mock.calls[0]!;
+    const firstCall = publishMock.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    if (!firstCall) {
+      throw new Error('Expected publish to be called at least once');
+    }
+    const payload = firstCall[1];
     expect(payload).toBeInstanceOf(Uint8Array);
     await handle.mutate((draft) => {
       draft.stats.set('count', 5);
@@ -478,11 +486,15 @@ describe('WiserRuntime', () => {
   it('cleans up realtime subscriptions when removing a document', async () => {
     const storage = createInMemoryStorageAdapter();
     const unsubscribe = vi.fn();
+    const subscribeMock = vi.fn<RealtimeAdapter['subscribe']>(
+      (_docId, _onUpdate) => unsubscribe
+    );
+    const publishMock = vi.fn<RealtimeAdapter['publish']>(
+      async (_docId, _update) => undefined
+    );
     const realtime: RealtimeAdapter = {
-      subscribe: vi.fn((_docId: string) => unsubscribe),
-      publish: vi.fn(async () => {
-        /* noop */
-      }),
+      subscribe: subscribeMock,
+      publish: publishMock,
     };
 
     const runtime = new WiserRuntime({ storage, realtime });
