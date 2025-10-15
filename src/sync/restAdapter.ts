@@ -251,10 +251,8 @@ function defaultEncodeUpdate(update: Uint8Array): string {
   if (typeof Buffer !== 'undefined') {
     return Buffer.from(update).toString('base64');
   }
-  let binary = '';
-  for (let i = 0; i < update.length; i += 1) {
-    binary += String.fromCharCode(update[i]!);
-  }
+  const chars = Array.from(update, byte => String.fromCharCode(byte));
+  const binary = chars.join('');
   return btoa(binary);
 }
 
