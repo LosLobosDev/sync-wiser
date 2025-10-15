@@ -150,7 +150,7 @@ export function List({ id }: { id: string }) {
 ## Configuration cheatsheet
 - **`storage`** *(required)*: implements update persistence through `getUpdates` and `appendUpdate`. Add `setSnapshot` to persist snapshots (the runtime simply warns and skips when it’s absent), plus `getSnapshot`/`getPendingSync` for faster hydration. Offline resilience still improves when you add `markPendingSync`/`clearPendingSync`.
 - **`sync`**: batch reconciliation path for clients that reconnect or request history.
-- **`realtime`**: live pub/sub channel for hot updates.
+- **`realtime`**: live pub/sub channel for hot updates. The runtime subscribes once per document, applies inbound updates, persists them, and republishes local changes after they’re stored and optionally synced.
 - **`codec`**: transform updates (compression, encryption, schema migration).
 - **`policies`**: tune GC, snapshot cadence (`snapshotEvery`), reconciliation behaviour (`pullBeforePush`), and snapshot sync controls (`snapshotSync.send`/`requestOnNewDocument`).
 - **`cache`**, **`logger`**, **`onError`**: operational controls for memory, observability, and resilience.
@@ -158,6 +158,59 @@ export function List({ id }: { id: string }) {
 > Need exact type signatures? Inspect the generated `.d.ts` files in `node_modules/@sync-wiser` or use your editor’s “Go to Definition”.
 
 ## Next steps
+
+### Realtime transport wiring
+
+```ts
+import type { RealtimeAdapter } from '@sync-wiser';
+
+const realtime: RealtimeAdapter = {
+  subscribe(docId, onUpdate) {
+    const listener = (payload: ArrayBuffer) => {
+      onUpdate(new Uint8Array(payload));
+    };
+    socket.on(docId, listener);
+    return () => socket.off(docId, listener);
+  },
+  async publish(docId, update) {
+    socket.emit(docId, update);
+  },
+};
+
+const wiserConfig: Wiser.Config = {
+  storage: createLocalStorageAdapter(),
+  sync: createMySyncAdapter(),
+  realtime,
+};
+```
+
+Supplying `realtime` is optional, but when present the runtime makes sure every local mutation is persisted, queued for `sync.push`, and then fanned out over the realtime channel. Incoming messages are decoded with your configured codec, merged into the Y.Doc, and written to storage without being marked as “pending sync”, so reconnecting clients stay consistent without duplicate pushes.
+
+### SignalR adapter
+
+```ts
+import {
+  createLocalStorageAdapter,
+  createSignalRRealtimeAdapter,
+} from '@sync-wiser';
+
+const realtime = createSignalRRealtimeAdapter({
+  url: 'https://collab.example.com/realtime',
+  publishMethod: 'SendDocumentUpdate', // optional overrides
+  receiveEvent: 'DocumentUpdate',
+  joinDocumentMethod: 'JoinDocument',
+  leaveDocumentMethod: 'LeaveDocument',
+  accessTokenFactory: () => authSession.getToken(),
+});
+
+const wiserConfig: Wiser.Config = {
+  storage: createLocalStorageAdapter(),
+  sync: createMySyncAdapter(),
+  realtime,
+};
+```
+
+The adapter keeps a single hub connection, joins the relevant document group when `WiserRuntime` subscribes, replays joins after reconnects, and pushes updates after they hit storage. Override method names or provide custom `encodeUpdate`/`decodeUpdate` hooks if your backend expects a different payload contract.
 1. Prototype with an in-memory `storage` adapter, then plug in your persistence (SQL/KV/Object storage).
 2. Layer in a `sync` route that mirrors Yjs’ update encoding so cold clients can catch up fast.
 3. Add presence by pairing sync-wiser with Yjs Awareness if you need cursors, selections, or typing indicators.

@@ -4,6 +4,7 @@ import { Wiser } from '../src/wiser';
 import { createInMemoryStorageAdapter } from '../src/storage/inMemoryStorageAdapter';
 import { WiserRuntime } from '../src/runtime/runtime';
 import type {
+  RealtimeAdapter,
   StorageAdapter,
   SyncAdapter,
   SyncPullOptions,
@@ -405,5 +406,88 @@ describe('WiserRuntime', () => {
 
     expect(calls.appendUpdate).toBe(1);
     expect(updatesPushed[0]).toBeInstanceOf(Uint8Array);
+  });
+
+  it('applies realtime updates and persists without marking them pending', async () => {
+    const storage = createInMemoryStorageAdapter();
+    let realtimeCallback: ((update: Uint8Array) => void) | null = null;
+    const unsubscribe = vi.fn();
+    const publishMock = vi.fn(async () => {
+      /* noop */
+    });
+    const realtime: RealtimeAdapter = {
+      subscribe: vi.fn((_docId: string, onUpdate: (update: Uint8Array) => void) => {
+        realtimeCallback = onUpdate;
+        return unsubscribe;
+      }),
+      publish: publishMock,
+    };
+
+    const runtime = new WiserRuntime({ storage, realtime });
+    const handle = await runtime.getDocument('doc-realtime-inbound', Counter);
+
+    expect(realtime.subscribe).toHaveBeenCalledTimes(1);
+    expect(realtimeCallback).not.toBeNull();
+
+    const remoteDoc = new Y.Doc();
+    const { data: remoteData } = Counter.instantiate(remoteDoc);
+    remoteData.stats.set('count', 9);
+    const remoteUpdate = Y.encodeStateAsUpdate(remoteDoc);
+
+    realtimeCallback!(remoteUpdate);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(handle.data.stats.get('count')).toBe(9);
+    const pendingSync = await storage.getPendingSync!('doc-realtime-inbound');
+    expect(pendingSync ?? []).toHaveLength(0);
+    const storedUpdates = await storage.getUpdates('doc-realtime-inbound');
+    expect(storedUpdates ?? []).not.toHaveLength(0);
+    expect(publishMock).not.toHaveBeenCalled();
+  });
+
+  it('publishes local updates over realtime transport', async () => {
+    const storage = createInMemoryStorageAdapter();
+    const unsubscribe = vi.fn();
+    const publishMock = vi.fn(async () => {
+      /* noop */
+    });
+    const realtime: RealtimeAdapter = {
+      subscribe: vi.fn((_docId: string) => unsubscribe),
+      publish: publishMock,
+    };
+
+    const runtime = new WiserRuntime({ storage, realtime });
+    const handle = await runtime.getDocument('doc-realtime-outbound', Counter);
+
+    await handle.mutate((draft) => {
+      draft.stats.set('count', 4);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(publishMock).toHaveBeenCalledTimes(1);
+    const [, payload] = publishMock.mock.calls[0]!;
+    expect(payload).toBeInstanceOf(Uint8Array);
+    await handle.mutate((draft) => {
+      draft.stats.set('count', 5);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(publishMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('cleans up realtime subscriptions when removing a document', async () => {
+    const storage = createInMemoryStorageAdapter();
+    const unsubscribe = vi.fn();
+    const realtime: RealtimeAdapter = {
+      subscribe: vi.fn((_docId: string) => unsubscribe),
+      publish: vi.fn(async () => {
+        /* noop */
+      }),
+    };
+
+    const runtime = new WiserRuntime({ storage, realtime });
+    const handle = await runtime.getDocument('doc-realtime-remove', Counter);
+
+    await handle.remove();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 });

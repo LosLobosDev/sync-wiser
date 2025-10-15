@@ -4,6 +4,7 @@ import { assembleStoredDoc } from '../storage/helpers';
 
 const STORAGE_ORIGIN = Symbol('wiser/storage');
 const SYNC_ORIGIN = Symbol('wiser/sync');
+const REALTIME_ORIGIN = Symbol('wiser/realtime');
 
 type ManagedDoc<TShape extends Record<string, unknown>> = {
   id: string;
@@ -16,6 +17,7 @@ type ManagedDoc<TShape extends Record<string, unknown>> = {
   syncedSnapshotGeneration: number;
   isBrandNew: boolean;
   unsubscribe: () => void;
+  realtimeUnsubscribe: (() => void) | null;
   syncQueue: Promise<void> | null;
   pendingSyncUpdates: Uint8Array[];
 };
@@ -101,6 +103,7 @@ export class WiserRuntime {
       unsubscribe: () => {
         /* replaced after handler registration */
       },
+      realtimeUnsubscribe: null,
       syncQueue: null,
       pendingSyncUpdates: pendingSyncFromStorage.map((update) => update.slice()),
     };
@@ -125,6 +128,12 @@ export class WiserRuntime {
         );
         return;
       }
+      if (origin === REALTIME_ORIGIN) {
+        this.persistUpdate(id, encoded, entry, { markPending: false }).catch(
+          (error) => this.reportError(error)
+        );
+        return;
+      }
 
       const persistPromise = this.persistUpdate(id, encoded, entry, {
         markPending: true,
@@ -133,12 +142,19 @@ export class WiserRuntime {
       persistPromise.catch((error) => this.reportError(error));
 
       if (!this.config.sync) {
+        if (this.config.realtime) {
+          this.enqueueSync(entry, async () => {
+            await persistPromise;
+            await this.publishRealtime(entry, encoded);
+          });
+        }
         return;
       }
 
       this.enqueueSync(entry, async () => {
         await persistPromise;
         await this.syncOutgoingUpdate(entry, encoded);
+        await this.publishRealtime(entry, encoded);
       });
     };
 
@@ -146,6 +162,8 @@ export class WiserRuntime {
     entry.unsubscribe = () => {
       doc.off('update', updateHandler);
     };
+
+    entry.realtimeUnsubscribe = this.subscribeRealtime(entry);
 
     if (entry.pendingSyncUpdates.length > 0 && this.config.sync) {
       const pendingQueue = entry.pendingSyncUpdates.slice();
@@ -169,6 +187,10 @@ export class WiserRuntime {
 
   private async remove(entry: ManagedDoc<any>) {
     entry.unsubscribe();
+    if (entry.realtimeUnsubscribe) {
+      entry.realtimeUnsubscribe();
+      entry.realtimeUnsubscribe = null;
+    }
     this.docs.delete(entry.id);
     await this.storage.remove(entry.id);
   }
@@ -390,6 +412,37 @@ export class WiserRuntime {
 
   private decode(update: Uint8Array): Uint8Array {
     return this.config.codec ? this.config.codec.decode(update) : update;
+  }
+
+  private subscribeRealtime(entry: ManagedDoc<any>): (() => void) | null {
+    const adapter = this.config.realtime;
+    if (!adapter) return null;
+
+    try {
+      const unsubscribe = adapter.subscribe(entry.id, (incoming) => {
+        try {
+          const decoded = this.decode(incoming);
+          Y.applyUpdate(entry.doc, decoded, REALTIME_ORIGIN);
+          this.refreshModelData(entry);
+        } catch (error) {
+          this.reportError(error);
+        }
+      });
+      return unsubscribe;
+    } catch (error) {
+      this.reportError(error);
+      return null;
+    }
+  }
+
+  private async publishRealtime(
+    entry: ManagedDoc<any>,
+    update: Uint8Array
+  ): Promise<void> {
+    const adapter = this.config.realtime;
+    if (!adapter) return;
+
+    await adapter.publish(entry.id, update);
   }
 
   private reportError(error: unknown) {

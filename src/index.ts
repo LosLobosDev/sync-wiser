@@ -18,3 +18,9 @@ export {
 } from './storage/localStorageAdapter';
 export type { LocalStorageAdapterOptions } from './storage/localStorageAdapter';
 export { WiserProvider, useWiserDoc, useWiserRuntime } from './react';
+export {
+  createSignalRRealtimeAdapter,
+} from './realtime/signalrAdapter';
+export type {
+  SignalRRealtimeAdapterOptions,
+} from './realtime/signalrAdapter';
