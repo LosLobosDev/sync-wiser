@@ -71,12 +71,15 @@ export function AppRoot() {
 
 ```tsx
 import * as React from 'react';
-import { useWiserDoc } from '@sync-wiser/react';
+import { useSyncWiser } from '@sync-wiser/react';
 import { ShoppingList } from './models';
 
 export function List({ id }: { id: string }) {
   const [text, setText] = React.useState('');
-  const { data, mutate, remove } = useWiserDoc(id, ShoppingList);
+  const { data, mutate, remove, sync, isSyncing } = useSyncWiser(
+    id,
+    ShoppingList
+  );
 
   const addItem = async () => {
     const name = text.trim();
@@ -132,6 +135,9 @@ export function List({ id }: { id: string }) {
 
       <hr />
       <button onClick={deleteList}>Delete list</button>
+      <button onClick={() => sync()} disabled={isSyncing}>
+        {isSyncing ? 'Syncing…' : 'Sync now'}
+      </button>
     </div>
   );
 }
@@ -156,6 +162,49 @@ export function List({ id }: { id: string }) {
 - **`cache`**, **`logger`**, **`onError`**: operational controls for memory, observability, and resilience.
 
 > Need exact type signatures? Inspect the generated `.d.ts` files in `node_modules/@sync-wiser` or use your editor’s “Go to Definition”.
+
+## Built-in adapters
+
+### REST sync adapter
+
+```ts
+import {
+  createLocalStorageAdapter,
+  createRestSyncAdapter,
+} from '@sync-wiser';
+
+const sync = createRestSyncAdapter({
+  baseUrl: 'https://api.example.com/sync',
+  // Override fetch/headers/builders/parsers if your API deviates.
+  // Provide getLastSynced/setLastSynced to persist the server-issued timestamp.
+});
+
+const wiserConfig: Wiser.Config = {
+  storage: createLocalStorageAdapter(),
+  sync,
+};
+```
+
+The REST adapter batches requests through `/pull` and `/push` endpoints that exchange `{ documents: [...] }` payloads by default. On first sync it expects the server to return a snapshot (when the client has no prior `dateLastSynced`), and falls back to incremental updates afterward. All payloads default to base64 strings; swap in custom `encodeUpdate`/`decodeUpdate` functions if you compress or encrypt data on the wire.
+
+### When sync runs
+
+Once you pass a `sync` adapter to `new WiserRuntime({ sync, storage, ... })`, the runtime handles everything automatically:
+- `getDocument(id, model)` kicks off an initial `pull` before resolving the handle—cold starts request a snapshot, later loads send the stored `dateLastSynced`.
+- Each mutation persists to storage, then enqueues both `push` (with snapshots when required) and any configured realtime publish without extra API calls from your app.
+- Pending updates recovered after reconnects are flushed through the same `push` path, and every successful response updates the stored `dateLastSynced`.
+
+Want visibility? Supply `onError` in the adapter options for centralized logging, or override `buildPullRequest`/`parsePullResponse` to hook in your telemetry while keeping the rest of the runtime API unchanged.
+
+### Sync hook
+
+```tsx
+import { useSyncWiser } from '@sync-wiser/react';
+
+const { data, mutate, sync, isSyncing } = useSyncWiser('doc-id', Model);
+```
+
+`useSyncWiser` wraps document access, mutation helpers, and sync telemetry in one place. Call `sync()` whenever you need to manually reconcile, and use `isSyncing` to drive loading indicators. The hook also keeps `mutate`/`remove` semantics identical to the legacy `useWiserDoc` API.
 
 ## Next steps
 
@@ -216,4 +265,4 @@ The adapter keeps a single hub connection, joins the relevant document group whe
 3. Add presence by pairing sync-wiser with Yjs Awareness if you need cursors, selections, or typing indicators.
 
 ## Examples
-- `examples/react-counter`: React + Vite demo showing `WiserProvider`, `useWiserDoc`, and the storage adapters powering a shared counter and todo list.
+- `examples/react-counter`: React + Vite demo showing `WiserProvider`, `useSyncWiser`, and the storage adapters powering a shared counter and todo list.

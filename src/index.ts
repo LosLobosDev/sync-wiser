@@ -11,16 +11,22 @@ export type {
   CacheOptions,
 } from './types';
 export { WiserRuntime } from './runtime/runtime';
-export type { WiserDocumentHandle } from './runtime/runtime';
+export type {
+  WiserDocumentHandle,
+  WiserSyncEvent,
+  WiserManualSyncOptions,
+} from './runtime/runtime';
 export { createInMemoryStorageAdapter } from './storage/inMemoryStorageAdapter';
 export {
   createLocalStorageAdapter,
 } from './storage/localStorageAdapter';
 export type { LocalStorageAdapterOptions } from './storage/localStorageAdapter';
-export { WiserProvider, useWiserDoc, useWiserRuntime } from './react';
+export { WiserProvider, useWiserDoc, useWiserRuntime, useSyncWiser } from './react';
 export {
   createSignalRRealtimeAdapter,
-} from './realtime/signalrAdapter';
-export type {
   SignalRRealtimeAdapterOptions,
 } from './realtime/signalrAdapter';
+export {
+  createRestSyncAdapter,
+  RestSyncAdapterOptions,
+} from './sync/restAdapter';
