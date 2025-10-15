@@ -490,6 +490,8 @@ describe('WiserRuntime', () => {
 
     await handle.remove();
     expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
   it('emits sync events for pull and push operations', async () => {
     const storage = createInMemoryStorageAdapter();
     const pullMock = vi.fn(async () => null);
