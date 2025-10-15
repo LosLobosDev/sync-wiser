@@ -23,8 +23,10 @@ export {
 export type { LocalStorageAdapterOptions } from './storage/localStorageAdapter';
 export { WiserProvider, useWiserDoc, useWiserRuntime, useSyncWiser } from './react';
 export {
+  createSignalRRealtimeAdapter,
+  SignalRRealtimeAdapterOptions,
+} from './realtime/signalrAdapter';
+export {
   createRestSyncAdapter,
-} from './sync/restAdapter';
-export type {
   RestSyncAdapterOptions,
 } from './sync/restAdapter';
