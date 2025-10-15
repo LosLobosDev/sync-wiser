@@ -122,7 +122,7 @@ export function createLocalStorageAdapter(
     );
   };
 
-  const adapter: StorageAdapter = {
+  const coreAdapter: StorageAdapter = {
     async getSnapshot(docId: string) {
       const persisted = read(docId);
       if (!persisted) return null;
@@ -200,6 +200,15 @@ export function createLocalStorageAdapter(
 
     async remove(docId: string): Promise<void> {
       storage.removeItem(docKey(namespace, docId));
+    },
+  };
+
+  const adapter: StorageAdapter & {
+    get(docId: string): Promise<StoredDoc | null>;
+  } = {
+    ...coreAdapter,
+    async get(docId: string): Promise<StoredDoc | null> {
+      return assembleStoredDoc(coreAdapter, docId);
     },
   };
 

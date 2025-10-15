@@ -45,11 +45,17 @@ describe('createLocalStorageAdapter', () => {
     const docId = 'doc-1';
     const snapshot = Uint8Array.from([1, 2, 3]);
 
-    await adapter.setSnapshot!(docId, snapshot);
+    if (!adapter.setSnapshot) {
+      throw new Error('Expected adapter.setSnapshot to be implemented for tests');
+    }
+    await adapter.setSnapshot(docId, snapshot);
     snapshot[0] = 99;
 
 
-    expect(await adapter.getSnapshot!(docId)).toEqual({ 
+    if (!adapter.getSnapshot) {
+      throw new Error('Expected adapter.getSnapshot to be implemented for tests');
+    }
+    expect(await adapter.getSnapshot(docId)).toEqual({ 
       snapshot:Uint8Array.from([1, 2, 3]), 
       snapshotGeneration: 1,
       syncedSnapshotGeneration: 0
@@ -57,7 +63,7 @@ describe('createLocalStorageAdapter', () => {
     expect(await adapter.getUpdates(docId)).toEqual([]);
 
     snapshot![1] = 77;
-    const reread = await adapter.getSnapshot!(docId);
+    const reread = await adapter.getSnapshot(docId);
     expect(reread?.snapshot).toEqual(Uint8Array.from([1, 2, 3]) );
   });
 
@@ -74,6 +80,9 @@ describe('createLocalStorageAdapter', () => {
     updateB[0] = 84;
 
     const updates = await adapter.getUpdates(docId);
+    if (!updates) {
+      throw new Error('Expected updates to be persisted');
+    }
     expect(updates).toEqual([
       Uint8Array.from([10]),
       Uint8Array.from([20]),
@@ -81,6 +90,9 @@ describe('createLocalStorageAdapter', () => {
 
     updates[0][0] = 99;
     const reread = await adapter.getUpdates(docId);
+    if (!reread) {
+      throw new Error('Expected updates to be readable after mutation');
+    }
     expect(reread[0]).toEqual(Uint8Array.from([10]));
   });
 
@@ -95,8 +107,11 @@ describe('createLocalStorageAdapter', () => {
     await adapter.appendUpdate('doc-trim', Uint8Array.from([2]));
     await adapter.appendUpdate('doc-trim', Uint8Array.from([3]));
 
-    const snapshot = await adapter.getUpdates('doc-trim');
-    expect(snapshot).toEqual([
+    const history = await adapter.getUpdates('doc-trim');
+    if (!history) {
+      throw new Error('Expected trimmed history to be returned');
+    }
+    expect(history).toEqual([
       Uint8Array.from([2]),
       Uint8Array.from([3]),
     ]);
@@ -104,6 +119,9 @@ describe('createLocalStorageAdapter', () => {
 
   it('removes docs from storage', async () => {
     const adapter = createLocalStorageAdapter({ storage });
+    if (!adapter.setSnapshot) {
+      throw new Error('Expected adapter.setSnapshot to be implemented for tests');
+    }
     await adapter.setSnapshot('doc-remove', Uint8Array.from([1]));
     await adapter.appendUpdate('doc-remove', Uint8Array.from([2]));
 

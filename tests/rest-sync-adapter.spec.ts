@@ -16,7 +16,8 @@ describe('createRestSyncAdapter', () => {
     const snapshotUpdate = Y.encodeStateAsUpdate(snapshotDoc);
     const snapshotBase64 = Buffer.from(snapshotUpdate).toString('base64');
 
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+    const fetchMock = vi.fn(
+      async (input: URL | RequestInfo, init?: RequestInit) => {
       const parsed = JSON.parse((init?.body as string) ?? '{}');
       expect(parsed.documents[0]).toMatchObject({
         id: 'doc-1',
@@ -75,7 +76,8 @@ describe('createRestSyncAdapter', () => {
     text.insert(0, 'hello');
     text.insert(5, ' world');
 
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+    const fetchMock = vi.fn(
+      async (input: URL | RequestInfo, init?: RequestInit) => {
       const parsed = JSON.parse((init?.body as string) ?? '{}');
       expect(parsed.documents[0]).toMatchObject({
         id: 'doc-2',
@@ -124,9 +126,10 @@ describe('createRestSyncAdapter', () => {
 
     const update = new Uint8Array([1, 2, 3, 4]);
 
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const fetchMock = vi.fn(
+      async (input: URL | RequestInfo, init?: RequestInit) => {
       const payload = JSON.parse((init?.body as string) ?? '{}');
-      expect(url).toBe('https://api.example.com/sync/push');
+      expect(input).toBe('https://api.example.com/sync/push');
       expect(payload.documents[0]).toMatchObject({
         id: 'doc-3',
         lastSynced: '2024-02-02T00:00:00Z',

@@ -3,6 +3,14 @@ import { createInMemoryStorageAdapter } from '../src/storage/inMemoryStorageAdap
 import { assembleStoredDoc } from '../src/storage/helpers';
 import type { StorageAdapter } from '../src/types';
 
+function expectDefined<T>(value: T | undefined, name: string): T {
+  expect(value, `${name} should be defined`).toBeDefined();
+  if (value === undefined) {
+    throw new Error(`Expected ${name} to be defined`);
+  }
+  return value;
+}
+
 describe('InMemoryStorageAdapter', () => {
   let storage = createInMemoryStorageAdapter();
 
@@ -18,7 +26,8 @@ describe('InMemoryStorageAdapter', () => {
     const docId = 'shopping-list';
     const snapshot = Uint8Array.from([1, 2, 3]);
 
-    await storage.setSnapshot(docId, snapshot);
+    const setSnapshot = expectDefined(storage.setSnapshot, 'setSnapshot');
+    await setSnapshot(docId, snapshot);
     snapshot[0] = 99;
 
     const stored = await assembleStoredDoc(storage, docId);
@@ -67,7 +76,8 @@ describe('InMemoryStorageAdapter', () => {
     const snapshot = Uint8Array.from([5]);
 
     await storage.appendUpdate(docId, update);
-    await storage.setSnapshot(docId, snapshot);
+    const setSnapshot = expectDefined(storage.setSnapshot, 'setSnapshot');
+    await setSnapshot(docId, snapshot);
 
     const stored = await assembleStoredDoc(storage, docId);
     expect(stored?.snapshot).toEqual(Uint8Array.from([5]));
@@ -76,7 +86,8 @@ describe('InMemoryStorageAdapter', () => {
 
   it('removes snapshots and updates when remove is called', async () => {
     const docId = 'shopping-list';
-    await storage.setSnapshot(docId, Uint8Array.from([1]));
+    const setSnapshot = expectDefined(storage.setSnapshot, 'setSnapshot');
+    await setSnapshot(docId, Uint8Array.from([1]));
     await storage.appendUpdate(docId, Uint8Array.from([2]));
 
     await storage.remove(docId);
@@ -157,7 +168,7 @@ describe('assembleStoredDoc', () => {
     };
 
     await expect(
-      assembleStoredDoc(storage as StorageAdapter, 'doc-id')
+      assembleStoredDoc(storage as unknown as StorageAdapter, 'doc-id')
     ).rejects.toThrow(/getUpdates/i);
   });
 });
