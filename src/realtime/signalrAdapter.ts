@@ -283,7 +283,7 @@ export function createSignalRRealtimeAdapter(
             return activeConnection
               .invoke(joinDocumentMethod, state.key)
               .then(() => {
-                state!.joined = true;
+                state.joined = true;
                 return activeConnection;
               });
           }
